@@ -19,6 +19,7 @@ To run the conformance tests, first set the following environment variables:
 - **ENABLE_PTP_EVENT**: enable event based tests.
 - **EVENT_API_VERSION**: passes the default REST-API version for the event based tests. Set this to "2.0" for 4.16+ PUT, "1.0" for 4.15 and earlier. If this is not set, default value "2.0" is used.
 - **ENABLE_V1_REGRESSION**: enable V1 regression for event based tests. For 4.16 and 4.17, event based tests will be repeated the second time with v1 REST-API. These tests are marked with "v1 regression".
+- **EXTERNAL_GM**: enables external grandmaster scenarios
 
 Then run the following command:
 ```
