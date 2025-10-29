@@ -48,6 +48,14 @@ type PtpDevice struct {
 	// This profile defines the PTP configuration settings for the device.
 	// +optional
 	Profile string `json:"profile,omitempty"`
+
+	// PhcId is the PTP Hardware Clock ID associated with this device.
+	// This is the /dev/ptpX identifier where X is the clock index.
+	// For example: "/dev/ptp0", "/dev/ptp1", etc.
+	// This field is used to map network interfaces to their PHC devices
+	// for cloud event resource identification.
+	// +optional
+	PhcId string `json:"phcId,omitempty"`
 }
 
 type HwConfig struct {
