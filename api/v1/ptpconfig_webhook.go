@@ -17,6 +17,7 @@ limitations under the License.
 package v1
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"regexp"
@@ -28,6 +29,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
@@ -45,7 +47,12 @@ var ptpconfiglog = logf.Log.WithName("ptpconfig-resource")
 var profileRegEx = regexp.MustCompile(`^([\w\-_]+)(,\s*([\w\-_]+))*$`)
 var clockTypes = []string{"T-GM", "T-BC"}
 
+// webhookClient is used by the webhook to query existing PtpConfigs
+var webhookClient client.Client
+
 func (r *PtpConfig) SetupWebhookWithManager(mgr ctrl.Manager) error {
+	// Store the client for use in validation
+	webhookClient = mgr.GetClient()
 	return ctrl.NewWebhookManagedBy(mgr).
 		For(r).
 		Complete()
@@ -59,6 +66,26 @@ type ptp4lConfSection struct {
 
 type ptp4lConf struct {
 	sections map[string]ptp4lConfSection
+}
+
+// Ptp4lConf is a public wrapper for ptp4lConf
+type Ptp4lConf struct {
+	conf ptp4lConf
+}
+
+// PopulatePtp4lConf parses the ptp4l configuration
+func (p *Ptp4lConf) PopulatePtp4lConf(config *string, ptp4lopts *string) error {
+	return p.conf.populatePtp4lConf(config, ptp4lopts)
+}
+
+// GetOption retrieves an option value from a specific section
+func (p *Ptp4lConf) GetOption(section, key string) string {
+	if sec, ok := p.conf.sections[section]; ok {
+		if val, ok := sec.options[key]; ok {
+			return val
+		}
+	}
+	return ""
 }
 
 func (output *ptp4lConf) populatePtp4lConf(config *string, ptp4lopts *string) error {
@@ -103,6 +130,7 @@ func (output *ptp4lConf) populatePtp4lConf(config *string, ptp4lopts *string) er
 
 func (r *PtpConfig) validate() error {
 	profiles := r.Spec.Profile
+
 	for _, profile := range profiles {
 		conf := &ptp4lConf{}
 		conf.populatePtp4lConf(profile.Ptp4lConf, profile.Ptp4lOpts)
@@ -194,12 +222,101 @@ func (r *PtpConfig) validate() error {
 	return nil
 }
 
+// validateSecretConflicts checks if this PtpConfig's sa_file + secret combination
+// conflicts with any existing PtpConfigs in the openshift-ptp namespace
+func (r *PtpConfig) validateSecretConflicts(ctx context.Context) error {
+	if webhookClient == nil {
+		ptpconfiglog.Info("webhook client not initialized, skipping cross-PtpConfig validation")
+		return nil
+	}
+
+	// Build map of sa_file -> secret for THIS PtpConfig
+	currentSaFileToSecret := make(map[string]string)
+	for _, profile := range r.Spec.Profile {
+		if profile.PtpSecretName == nil || *profile.PtpSecretName == "" {
+			continue
+		}
+		if profile.Ptp4lConf == nil {
+			continue
+		}
+
+		conf := &ptp4lConf{}
+		if err := conf.populatePtp4lConf(profile.Ptp4lConf, profile.Ptp4lOpts); err != nil {
+			continue
+		}
+
+		if globalSection, exists := conf.sections["[global]"]; exists {
+			if saFile, exists := globalSection.options["sa_file"]; exists && saFile != "" {
+				currentSaFileToSecret[saFile] = *profile.PtpSecretName
+			}
+		}
+	}
+
+	// If this PtpConfig doesn't use any secrets, no conflict possible
+	if len(currentSaFileToSecret) == 0 {
+		return nil
+	}
+
+	// List all existing PtpConfigs in openshift-ptp namespace
+	ptpConfigList := &PtpConfigList{}
+	if err := webhookClient.List(ctx, ptpConfigList, &client.ListOptions{
+		Namespace: "openshift-ptp",
+	}); err != nil {
+		ptpconfiglog.Error(err, "failed to list PtpConfigs for validation")
+		// Don't block creation if we can't list - fail open
+		return nil
+	}
+
+	// Check each existing PtpConfig
+	for _, existingConfig := range ptpConfigList.Items {
+		// Skip checking against ourselves (for updates)
+		if existingConfig.Name == r.Name && existingConfig.Namespace == r.Namespace {
+			continue
+		}
+
+		// Check each profile in the existing config
+		for _, profile := range existingConfig.Spec.Profile {
+			if profile.PtpSecretName == nil || *profile.PtpSecretName == "" {
+				continue
+			}
+			if profile.Ptp4lConf == nil {
+				continue
+			}
+
+			conf := &ptp4lConf{}
+			if err := conf.populatePtp4lConf(profile.Ptp4lConf, profile.Ptp4lOpts); err != nil {
+				continue
+			}
+
+			if globalSection, exists := conf.sections["[global]"]; exists {
+				if saFile, exists := globalSection.options["sa_file"]; exists && saFile != "" {
+					// Check if THIS PtpConfig uses the same sa_file
+					if currentSecret, found := currentSaFileToSecret[saFile]; found {
+						// Conflict: same sa_file but different secret
+						if currentSecret != *profile.PtpSecretName {
+							return fmt.Errorf("sa_file '%s' conflict: PtpConfig '%s' already uses secret '%s' with this sa_file path, but this PtpConfig tries to use secret '%s'. All PtpConfigs using the same sa_file must reference the same secret",
+								saFile, existingConfig.Name, *profile.PtpSecretName, currentSecret)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
 var _ webhook.Validator = &PtpConfig{}
 
 // ValidateCreate implements webhook.Validator so a webhook will be registered for the type
 func (r *PtpConfig) ValidateCreate() (admission.Warnings, error) {
 	ptpconfiglog.Info("validate create", "name", r.Name)
 	if err := r.validate(); err != nil {
+		return admission.Warnings{}, err
+	}
+
+	// Check for cross-PtpConfig secret conflicts
+	if err := r.validateSecretConflicts(context.Background()); err != nil {
 		return admission.Warnings{}, err
 	}
 
@@ -210,6 +327,11 @@ func (r *PtpConfig) ValidateCreate() (admission.Warnings, error) {
 func (r *PtpConfig) ValidateUpdate(old runtime.Object) (admission.Warnings, error) {
 	ptpconfiglog.Info("validate update", "name", r.Name)
 	if err := r.validate(); err != nil {
+		return admission.Warnings{}, err
+	}
+
+	// Check for cross-PtpConfig secret conflicts
+	if err := r.validateSecretConflicts(context.Background()); err != nil {
 		return admission.Warnings{}, err
 	}
 

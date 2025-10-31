@@ -53,12 +53,31 @@ func ApplyObject(ctx context.Context, client k8sclient.Client, obj *uns.Unstruct
 	if err := MergeObjectForUpdate(existing, obj); err != nil {
 		return errors.Wrapf(err, "could not merge object %s with existing", objDesc)
 	}
+
 	if !equality.Semantic.DeepEqual(existing, obj) {
+		log.Printf("updating %s (object differs from existing)", objDesc)
+
+		// Log volumes for DaemonSet updates to help debug
+		if gvk.Kind == "DaemonSet" {
+			if volumes, found, _ := uns.NestedSlice(obj.Object, "spec", "template", "spec", "volumes"); found {
+				log.Printf("  DaemonSet volumes after merge: %d volumes", len(volumes))
+				for _, vol := range volumes {
+					if volMap, ok := vol.(map[string]interface{}); ok {
+						if name, ok := volMap["name"].(string); ok {
+							log.Printf("    - volume: %s", name)
+						}
+					}
+				}
+			}
+		}
+
 		if err := client.Update(ctx, obj); err != nil {
 			return errors.Wrapf(err, "could not update object %s", objDesc)
 		} else {
 			log.Printf("update was successful")
 		}
+	} else {
+		log.Printf("no update needed for %s (objects are equal)", objDesc)
 	}
 
 	return nil

@@ -1,6 +1,8 @@
 package apply
 
 import (
+	"log"
+
 	"github.com/pkg/errors"
 
 	uns "k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -27,6 +29,10 @@ func MergeMetadataForUpdate(current, updated *uns.Unstructured) error {
 // some semantic-aware updates
 func MergeObjectForUpdate(current, updated *uns.Unstructured) error {
 	if err := MergeDeploymentForUpdate(current, updated); err != nil {
+		return err
+	}
+
+	if err := MergeDaemonSetForUpdate(current, updated); err != nil {
 		return err
 	}
 
@@ -74,6 +80,341 @@ func MergeDeploymentForUpdate(current, updated *uns.Unstructured) error {
 	}
 
 	return nil
+}
+
+// MergeDaemonSetForUpdate merges DaemonSet templates, preserving ptp-security-* volumes
+// from current (existing) DaemonSet. These volumes are dynamically managed by ptpconfig_controller
+// and should not be overwritten when PtpOperatorConfig reconciles the base DaemonSet template.
+func MergeDaemonSetForUpdate(current, updated *uns.Unstructured) error {
+	gvk := updated.GroupVersionKind()
+	if gvk.Group == "apps" && gvk.Kind == "DaemonSet" {
+		// Only apply to linuxptp-daemon DaemonSet
+		if updated.GetName() != "linuxptp-daemon" {
+			return nil
+		}
+
+		// Merge volumes: preserve ptp-security-* from current, add base volumes from updated
+		if err := mergeSecurityVolumes(current, updated); err != nil {
+			return err
+		}
+
+		// Merge annotations: preserve ptp-security-* hash annotations from current
+		if err := mergeSecurityAnnotations(current, updated); err != nil {
+			return err
+		}
+
+		// Merge volume mounts: preserve ptp-security-* mounts from current
+		if err := mergeSecurityVolumeMounts(current, updated); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// mergeSecurityVolumes preserves PTP security volumes from current DaemonSet
+// Security volumes end with "-ptpconfig-sec" suffix and are managed by ptpconfig_controller
+func mergeSecurityVolumes(current, updated *uns.Unstructured) error {
+	currentVolumes, found, err := uns.NestedSlice(current.Object, "spec", "template", "spec", "volumes")
+	if err != nil || !found {
+		return err
+	}
+
+	updatedVolumes, found, err := uns.NestedSlice(updated.Object, "spec", "template", "spec", "volumes")
+	if err != nil {
+		return err
+	}
+	if !found {
+		updatedVolumes = []interface{}{}
+	}
+
+	// Log all volumes in current for debugging
+	log.Printf("MergeDaemonSet: Current DaemonSet has %d volumes", len(currentVolumes))
+	for _, vol := range currentVolumes {
+		if volMap, ok := vol.(map[string]interface{}); ok {
+			if name, ok := volMap["name"].(string); ok {
+				log.Printf("  MergeDaemonSet: current volume: %s", name)
+			}
+		}
+	}
+
+	// Extract security volumes from current (volumes ending with "-ptpconfig-sec")
+	var currentSecurityVolumes []interface{}
+	for _, vol := range currentVolumes {
+		volMap, ok := vol.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		name, ok := volMap["name"].(string)
+		if !ok {
+			continue
+		}
+
+		// Check if it's a security volume (ends with "-ptpconfig-sec")
+		if len(name) >= 14 && name[len(name)-14:] == "-ptpconfig-sec" {
+			log.Printf("MergeDaemonSet: Found security volume in current: %s", name)
+			currentSecurityVolumes = append(currentSecurityVolumes, vol)
+		}
+	}
+
+	// Extract security volumes from updated (volumes ending with "-ptpconfig-sec")
+	var updatedSecurityVolumes []interface{}
+	for _, vol := range updatedVolumes {
+		volMap, ok := vol.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		name, ok := volMap["name"].(string)
+		if !ok {
+			continue
+		}
+
+		// Check if it's a security volume (ends with "-ptpconfig-sec")
+		if len(name) >= 14 && name[len(name)-14:] == "-ptpconfig-sec" {
+			log.Printf("MergeDaemonSet: Found security volume in updated: %s", name)
+			updatedSecurityVolumes = append(updatedSecurityVolumes, vol)
+		}
+	}
+
+	// Check if PtpConfig has reconciled (look for marker annotation)
+	updatedAnnotations, _, _ := uns.NestedStringMap(updated.Object, "spec", "template", "metadata", "annotations")
+	ptpConfigReconciled := false
+	if updatedAnnotations != nil {
+		if _, exists := updatedAnnotations["ptp.openshift.io/ptpconfig-reconciled"]; exists {
+			ptpConfigReconciled = true
+		}
+	}
+
+	// Determine which security volumes to use
+	var securityVolumesToUse []interface{}
+	if len(updatedSecurityVolumes) > 0 {
+		// PtpConfig is updating - use volumes from updated
+		log.Printf("MergeDaemonSet: Using %d security volume(s) from updated (PtpConfig reconciliation)", len(updatedSecurityVolumes))
+		securityVolumesToUse = updatedSecurityVolumes
+	} else if ptpConfigReconciled {
+		// PtpConfig reconciled but removed all volumes (marker present, 0 volumes)
+		log.Printf("MergeDaemonSet: PtpConfig reconciled with 0 security volumes (all sa_file removed)")
+		securityVolumesToUse = []interface{}{} // Explicitly empty - don't preserve from current
+	} else if len(currentSecurityVolumes) > 0 {
+		// PtpOperatorConfig is updating - preserve volumes from current
+		log.Printf("MergeDaemonSet: Preserving %d security volume(s) from current (PtpOperatorConfig reconciliation)", len(currentSecurityVolumes))
+		securityVolumesToUse = currentSecurityVolumes
+	} else {
+		// No security volumes anywhere
+		log.Printf("MergeDaemonSet: No security volumes in current or updated")
+		return nil
+	}
+
+	// Build merged volumes: base volumes from updated + security volumes
+	mergedVolumes := []interface{}{}
+	for _, vol := range updatedVolumes {
+		volMap, ok := vol.(map[string]interface{})
+		if !ok {
+			mergedVolumes = append(mergedVolumes, vol)
+			continue
+		}
+		name, ok := volMap["name"].(string)
+		if !ok {
+			mergedVolumes = append(mergedVolumes, vol)
+			continue
+		}
+
+		// Skip security volumes - we'll add from our chosen set
+		if len(name) >= 14 && name[len(name)-14:] == "-ptpconfig-sec" {
+			continue
+		}
+		mergedVolumes = append(mergedVolumes, vol)
+	}
+
+	// Add security volumes
+	mergedVolumes = append(mergedVolumes, securityVolumesToUse...)
+
+	return uns.SetNestedSlice(updated.Object, mergedVolumes, "spec", "template", "spec", "volumes")
+}
+
+// mergeSecurityAnnotations preserves ptp.openshift.io/secret-hash-* annotations from current
+func mergeSecurityAnnotations(current, updated *uns.Unstructured) error {
+	currentAnnotations, found, err := uns.NestedStringMap(current.Object, "spec", "template", "metadata", "annotations")
+	if err != nil || !found {
+		currentAnnotations = make(map[string]string)
+	}
+
+	updatedAnnotations, found, err := uns.NestedStringMap(updated.Object, "spec", "template", "metadata", "annotations")
+	if err != nil {
+		return err
+	}
+	if !found {
+		updatedAnnotations = make(map[string]string)
+	}
+
+	// Check if PtpConfig reconciled (marker annotation)
+	ptpConfigReconciled := false
+	if _, exists := updatedAnnotations["ptp.openshift.io/ptpconfig-reconciled"]; exists {
+		ptpConfigReconciled = true
+	}
+
+	// Count security annotations in updated
+	updatedHasSecurityAnnotations := false
+	for k := range updatedAnnotations {
+		if len(k) > 29 && k[:29] == "ptp.openshift.io/secret-hash-" {
+			updatedHasSecurityAnnotations = true
+			break
+		}
+	}
+
+	if updatedHasSecurityAnnotations || ptpConfigReconciled {
+		// PtpConfig reconciled - use updated's annotations
+		log.Printf("MergeDaemonSet: Using security annotations from updated (PtpConfig reconciled)")
+		return uns.SetNestedStringMap(updated.Object, updatedAnnotations, "spec", "template", "metadata", "annotations")
+	}
+
+	// PtpOperatorConfig reconciled - preserve security annotations from current
+	prefix := "ptp.openshift.io/secret-hash-"
+	for k, v := range currentAnnotations {
+		if len(k) > len(prefix) && k[:len(prefix)] == prefix {
+			updatedAnnotations[k] = v
+		}
+	}
+	log.Printf("MergeDaemonSet: Preserved security annotations from current (PtpOperatorConfig reconciled)")
+
+	return uns.SetNestedStringMap(updated.Object, updatedAnnotations, "spec", "template", "metadata", "annotations")
+}
+
+// mergeSecurityVolumeMounts preserves security volume mounts from current or updated
+func mergeSecurityVolumeMounts(current, updated *uns.Unstructured) error {
+	currentContainers, found, err := uns.NestedSlice(current.Object, "spec", "template", "spec", "containers")
+	if err != nil || !found {
+		return err
+	}
+
+	updatedContainers, found, err := uns.NestedSlice(updated.Object, "spec", "template", "spec", "containers")
+	if err != nil || !found {
+		return err
+	}
+
+	// Find security mounts in current linuxptp-daemon-container
+	var currentSecurityMounts []interface{}
+	for _, cont := range currentContainers {
+		contMap, ok := cont.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if name, ok := contMap["name"].(string); ok && name == "linuxptp-daemon-container" {
+			mounts, found, err := uns.NestedSlice(contMap, "volumeMounts")
+			if err != nil || !found {
+				break
+			}
+			for _, mount := range mounts {
+				mountMap, ok := mount.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				if mountName, ok := mountMap["name"].(string); ok {
+					if len(mountName) >= 14 && mountName[len(mountName)-14:] == "-ptpconfig-sec" {
+						currentSecurityMounts = append(currentSecurityMounts, mount)
+					}
+				}
+			}
+			break
+		}
+	}
+
+	// Find security mounts in updated linuxptp-daemon-container
+	var updatedSecurityMounts []interface{}
+	for _, cont := range updatedContainers {
+		contMap, ok := cont.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if name, ok := contMap["name"].(string); ok && name == "linuxptp-daemon-container" {
+			mounts, found, err := uns.NestedSlice(contMap, "volumeMounts")
+			if err != nil || !found {
+				break
+			}
+			for _, mount := range mounts {
+				mountMap, ok := mount.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				if mountName, ok := mountMap["name"].(string); ok {
+					if len(mountName) >= 14 && mountName[len(mountName)-14:] == "-ptpconfig-sec" {
+						updatedSecurityMounts = append(updatedSecurityMounts, mount)
+					}
+				}
+			}
+			break
+		}
+	}
+
+	// Check if PtpConfig reconciled (marker annotation)
+	updatedAnnotations, _, _ := uns.NestedStringMap(updated.Object, "spec", "template", "metadata", "annotations")
+	ptpConfigReconciled := false
+	if updatedAnnotations != nil {
+		if _, exists := updatedAnnotations["ptp.openshift.io/ptpconfig-reconciled"]; exists {
+			ptpConfigReconciled = true
+		}
+	}
+
+	// Determine which security mounts to use
+	var securityMountsToUse []interface{}
+	if len(updatedSecurityMounts) > 0 {
+		// PtpConfig is updating - use mounts from updated
+		log.Printf("MergeDaemonSet: Using %d security mount(s) from updated", len(updatedSecurityMounts))
+		securityMountsToUse = updatedSecurityMounts
+	} else if ptpConfigReconciled {
+		// PtpConfig reconciled but removed all mounts
+		log.Printf("MergeDaemonSet: PtpConfig reconciled with 0 security mounts (all sa_file removed)")
+		securityMountsToUse = []interface{}{} // Explicitly empty
+	} else if len(currentSecurityMounts) > 0 {
+		// PtpOperatorConfig is updating - preserve mounts from current
+		log.Printf("MergeDaemonSet: Preserving %d security mount(s) from current", len(currentSecurityMounts))
+		securityMountsToUse = currentSecurityMounts
+	} else {
+		// No security mounts
+		return nil
+	}
+
+	// Merge mounts for linuxptp-daemon-container
+	for i, cont := range updatedContainers {
+		contMap, ok := cont.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if name, ok := contMap["name"].(string); ok && name == "linuxptp-daemon-container" {
+			mounts, found, err := uns.NestedSlice(contMap, "volumeMounts")
+			if err != nil {
+				return err
+			}
+			if !found {
+				mounts = []interface{}{}
+			}
+
+			// Remove security mounts from base mounts
+			mergedMounts := []interface{}{}
+			for _, mount := range mounts {
+				mountMap, ok := mount.(map[string]interface{})
+				if !ok {
+					mergedMounts = append(mergedMounts, mount)
+					continue
+				}
+				if mountName, ok := mountMap["name"].(string); ok {
+					// Skip security mounts - we'll add from our chosen set
+					if len(mountName) >= 14 && mountName[len(mountName)-14:] == "-ptpconfig-sec" {
+						continue
+					}
+				}
+				mergedMounts = append(mergedMounts, mount)
+			}
+
+			// Add security mounts
+			mergedMounts = append(mergedMounts, securityMountsToUse...)
+			contMap["volumeMounts"] = mergedMounts
+			updatedContainers[i] = contMap
+			break
+		}
+	}
+
+	return uns.SetNestedSlice(updated.Object, updatedContainers, "spec", "template", "spec", "containers")
 }
 
 // MergeServiceForUpdate ensures the clusterip is never written to
