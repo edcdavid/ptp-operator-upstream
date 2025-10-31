@@ -173,6 +173,31 @@ func GetClockIfRoles(Ifs []string, nodeName *string) (roleInt []MetricRole, err 
 	return roleInt, nil
 }
 
+// getPhcIdForInterface retrieves the phcId (e.g., "/dev/ptp1") for a given interface and node
+func getPhcIdForInterface(nodeName, ifaceName string) (string, error) {
+	// Get NodePtpDevice resource for the node
+	nodePtpDevices, err := client.Client.PtpV1Interface.NodePtpDevices(pkg.PtpLinuxDaemonNamespace).List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		return "", fmt.Errorf("error listing NodePtpDevices: %s", err)
+	}
+
+	// Find the NodePtpDevice for this node
+	for _, nodePtpDevice := range nodePtpDevices.Items {
+		if nodePtpDevice.Name != nodeName {
+			continue
+		}
+
+		// Find the device with matching interface name
+		for _, device := range nodePtpDevice.Status.Devices {
+			if device.Name == ifaceName && device.PhcId != "" {
+				return device.PhcId, nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("phcId not found for interface %s on node %s", ifaceName, nodeName)
+}
+
 // gets a metric value string for a given node and interface
 func getMetric(nodeName, aIf, metricName string) (metric string, err error) {
 	const (
@@ -196,14 +221,28 @@ func getMetric(nodeName, aIf, metricName string) (metric string, err error) {
 
 		metrics := buf.String()
 		var regex string
-		if metricName == OpenshiftPtpOffsetNs {
-			aIf = aIf[:len(aIf)-1] + "x"
-			regex = metricName + `{` + fromMaster + `iface="` + aIf + `",node="` + ptpPods.Items[index].Spec.NodeName + `",process="ptp4l"} (-*[0-9]*)`
-		} else if metricName == OpenshiftPtpClockState {
-			aIf = aIf[:len(aIf)-1] + "x"
-			regex = metricName + `{iface="` + aIf + `",node="` + ptpPods.Items[index].Spec.NodeName + `",process="ptp4l"} (-*[0-9]*)`
+		var ifaceLabel string
+
+		// For OpenshiftPtpOffsetNs and OpenshiftPtpClockState, use phcId instead of interface name
+		if metricName == OpenshiftPtpOffsetNs || metricName == OpenshiftPtpClockState {
+			phcId, err := getPhcIdForInterface(nodeName, aIf)
+			if err != nil {
+				// Fallback to interface name if phcId lookup fails
+				logrus.Warnf("Failed to get phcId for interface %s: %v, using interface name", aIf, err)
+				ifaceLabel = aIf
+			} else {
+				ifaceLabel = phcId
+			}
 		} else {
-			regex = metricName + `{iface="` + aIf + `",node="` + ptpPods.Items[index].Spec.NodeName + `",process="ptp4l"} (-*[0-9]*)`
+			ifaceLabel = aIf
+		}
+
+		if metricName == OpenshiftPtpOffsetNs {
+			regex = metricName + `{` + fromMaster + `iface="` + ifaceLabel + `",node="` + ptpPods.Items[index].Spec.NodeName + `",process="ptp4l"} (-*[0-9]*)`
+		} else if metricName == OpenshiftPtpClockState {
+			regex = metricName + `{iface="` + ifaceLabel + `",node="` + ptpPods.Items[index].Spec.NodeName + `",process="ptp4l"} (-*[0-9]*)`
+		} else {
+			regex = metricName + `{iface="` + ifaceLabel + `",node="` + ptpPods.Items[index].Spec.NodeName + `",process="ptp4l"} (-*[0-9]*)`
 		}
 		r := regexp.MustCompile(regex)
 		for _, submatches := range r.FindAllStringSubmatchIndex(metrics, -1) {

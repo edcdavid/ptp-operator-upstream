@@ -28,31 +28,6 @@ rules:
   - ptp.openshift.io
   resources:
   - ptpconfigs
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - ptp.openshift.io
-  resources:
-  - ptpconfigs/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - ptp.openshift.io
-  resources:
-  - ptpconfigs/status
-  verbs:
-  - get
-  - patch
-  - update
-- apiGroups:
-  - ptp.openshift.io
-  resources:
   - ptpoperatorconfigs
   verbs:
   - create
@@ -65,12 +40,14 @@ rules:
 - apiGroups:
   - ptp.openshift.io
   resources:
+  - ptpconfigs/finalizers
   - ptpoperatorconfigs/finalizers
   verbs:
   - update
 - apiGroups:
   - ptp.openshift.io
   resources:
+  - ptpconfigs/status
   - ptpoperatorconfigs/status
   verbs:
   - get

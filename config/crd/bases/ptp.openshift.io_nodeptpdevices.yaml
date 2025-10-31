@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.15.0
+    controller-gen.kubebuilder.io/version: v0.19.0
   name: nodeptpdevices.ptp.openshift.io
 spec:
   group: ptp.openshift.io
@@ -56,6 +56,14 @@ spec:
                       description: |-
                         Name is the name of the PTP device.
                         It is a unique identifier for the device.
+                      type: string
+                    phcId:
+                      description: |-
+                        PhcId is the PTP Hardware Clock ID associated with this device.
+                        This is the /dev/ptpX identifier where X is the clock index.
+                        For example: "/dev/ptp0", "/dev/ptp1", etc.
+                        This field is used to map network interfaces to their PHC devices
+                        for cloud event resource identification.
                       type: string
                     profile:
                       description: |-
