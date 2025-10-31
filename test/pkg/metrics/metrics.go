@@ -259,18 +259,18 @@ func getMetric(nodeName, aIf, metricName string) (metric string, err error) {
 		}
 
 		if metricName == OpenshiftPtpOffsetNs {
-			regex = metricName + `{` + fromMaster + `iface="` + ifaceLabel + `",node="` + ptpPods.Items[index].Spec.NodeName + `",process="ptp4l"} (-*[0-9]*)`
+			regex = metricName + `{` + fromMaster + `clkid="` + ifaceLabel + `",node="` + ptpPods.Items[index].Spec.NodeName + `",process="ptp4l"} (-*[0-9]*)`
 		} else if metricName == OpenshiftPtpClockState {
-			regex = metricName + `{iface="` + ifaceLabel + `",node="` + ptpPods.Items[index].Spec.NodeName + `",process="ptp4l"} (-*[0-9]*)`
+			regex = metricName + `{clkid="` + ifaceLabel + `",node="` + ptpPods.Items[index].Spec.NodeName + `",process="ptp4l"} (-*[0-9]*)`
 		} else {
-			regex = metricName + `{iface="` + ifaceLabel + `",node="` + ptpPods.Items[index].Spec.NodeName + `",process="ptp4l"} (-*[0-9]*)`
+			regex = metricName + `{clkid="` + ifaceLabel + `",node="` + ptpPods.Items[index].Spec.NodeName + `",process="ptp4l"} (-*[0-9]*)`
 		}
 		logrus.Debugf("Searching metrics with regex: %s", regex)
 
 		r := regexp.MustCompile(regex)
 		for _, submatches := range r.FindAllStringSubmatchIndex(metrics, -1) {
 			metric = string(r.ExpandString([]byte{}, "$1", metrics, submatches))
-			logrus.Infof("Found metric value: %s for %s (iface=%s, node=%s)", metric, metricName, ifaceLabel, nodeName)
+			logrus.Infof("Found metric value: %s for %s (clkid=%s, node=%s)", metric, metricName, ifaceLabel, nodeName)
 			return metric, nil
 		}
 		logrus.Warnf("No matches found for regex: %s", regex)
