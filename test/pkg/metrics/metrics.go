@@ -175,26 +175,34 @@ func GetClockIfRoles(Ifs []string, nodeName *string) (roleInt []MetricRole, err 
 
 // getPhcIdForInterface retrieves the phcId (e.g., "/dev/ptp1") for a given interface and node
 func getPhcIdForInterface(nodeName, ifaceName string) (string, error) {
+	logrus.Debugf("getPhcIdForInterface called: nodeName=%s, ifaceName=%s", nodeName, ifaceName)
+
 	// Get NodePtpDevice resource for the node
 	nodePtpDevices, err := client.Client.PtpV1Interface.NodePtpDevices(pkg.PtpLinuxDaemonNamespace).List(context.Background(), metav1.ListOptions{})
 	if err != nil {
+		logrus.Errorf("Failed to list NodePtpDevices: %v", err)
 		return "", fmt.Errorf("error listing NodePtpDevices: %s", err)
 	}
+	logrus.Debugf("Found %d NodePtpDevice resources", len(nodePtpDevices.Items))
 
 	// Find the NodePtpDevice for this node
 	for _, nodePtpDevice := range nodePtpDevices.Items {
 		if nodePtpDevice.Name != nodeName {
 			continue
 		}
+		logrus.Debugf("Found NodePtpDevice for node %s with %d devices", nodeName, len(nodePtpDevice.Status.Devices))
 
 		// Find the device with matching interface name
 		for _, device := range nodePtpDevice.Status.Devices {
+			logrus.Debugf("Checking device: name=%s, phcId=%s, profile=%s", device.Name, device.PhcId, device.Profile)
 			if device.Name == ifaceName && device.PhcId != "" {
+				logrus.Infof("Found phcId %s for interface %s on node %s", device.PhcId, ifaceName, nodeName)
 				return device.PhcId, nil
 			}
 		}
 	}
 
+	logrus.Warnf("phcId not found for interface %s on node %s", ifaceName, nodeName)
 	return "", fmt.Errorf("phcId not found for interface %s on node %s", ifaceName, nodeName)
 }
 
@@ -203,37 +211,50 @@ func getMetric(nodeName, aIf, metricName string) (metric string, err error) {
 	const (
 		fromMaster = `from="master",`
 	)
+	logrus.Debugf("getMetric called: nodeName=%s, interface=%s, metricName=%s", nodeName, aIf, metricName)
+
 	ptpPods, err := client.Client.CoreV1().Pods(pkg.PtpLinuxDaemonNamespace).List(context.Background(), metav1.ListOptions{LabelSelector: "app=linuxptp-daemon"})
 	if err != nil {
+		logrus.Errorf("Failed to list PTP pods: %v", err)
 		return metric, err
 	}
+	logrus.Debugf("Found %d PTP daemon pods", len(ptpPods.Items))
+
 	for index := range ptpPods.Items {
 		if ptpPods.Items[index].Spec.NodeName != nodeName {
 			continue
 		}
+		logrus.Debugf("Found matching pod %s on node %s", ptpPods.Items[index].Name, nodeName)
+
 		commands := []string{
 			"curl", "-s", metricsEndPoint,
 		}
 		buf, _, err := pods.ExecCommand(client.Client, false, &ptpPods.Items[index], ptpPods.Items[index].Spec.Containers[0].Name, commands)
 		if err != nil {
+			logrus.Errorf("Failed to execute curl command in pod %s: %v", ptpPods.Items[index].Name, err)
 			return metric, fmt.Errorf("error getting ptp pods for metric: %s not found, err: %s", metricName, err)
 		}
 
 		metrics := buf.String()
+		logrus.Debugf("Retrieved %d bytes of metrics data from pod %s", len(metrics), ptpPods.Items[index].Name)
+
 		var regex string
 		var ifaceLabel string
 
 		// For OpenshiftPtpOffsetNs and OpenshiftPtpClockState, use phcId instead of interface name
 		if metricName == OpenshiftPtpOffsetNs || metricName == OpenshiftPtpClockState {
+			logrus.Debugf("Attempting to lookup phcId for interface %s on node %s", aIf, nodeName)
 			phcId, err := getPhcIdForInterface(nodeName, aIf)
 			if err != nil {
 				// Fallback to interface name if phcId lookup fails
-				logrus.Warnf("Failed to get phcId for interface %s: %v, using interface name", aIf, err)
+				logrus.Warnf("Failed to get phcId for interface %s on node %s: %v, using interface name as fallback", aIf, nodeName, err)
 				ifaceLabel = aIf
 			} else {
+				logrus.Infof("Using phcId %s for interface %s on node %s", phcId, aIf, nodeName)
 				ifaceLabel = phcId
 			}
 		} else {
+			logrus.Debugf("Using interface name %s directly for metric %s", aIf, metricName)
 			ifaceLabel = aIf
 		}
 
@@ -244,14 +265,20 @@ func getMetric(nodeName, aIf, metricName string) (metric string, err error) {
 		} else {
 			regex = metricName + `{iface="` + ifaceLabel + `",node="` + ptpPods.Items[index].Spec.NodeName + `",process="ptp4l"} (-*[0-9]*)`
 		}
+		logrus.Debugf("Searching metrics with regex: %s", regex)
+
 		r := regexp.MustCompile(regex)
 		for _, submatches := range r.FindAllStringSubmatchIndex(metrics, -1) {
 			metric = string(r.ExpandString([]byte{}, "$1", metrics, submatches))
+			logrus.Infof("Found metric value: %s for %s (iface=%s, node=%s)", metric, metricName, ifaceLabel, nodeName)
 			return metric, nil
 		}
+		logrus.Warnf("No matches found for regex: %s", regex)
 		break
 	}
-	return metric, fmt.Errorf("metric: %s, nodeName: %s, aIf: %s not found", metricName, nodeName, aIf)
+	errMsg := fmt.Sprintf("metric: %s, nodeName: %s, aIf: %s not found", metricName, nodeName, aIf)
+	logrus.Error(errMsg)
+	return metric, fmt.Errorf(errMsg)
 }
 
 // gets a node name based on a label
