@@ -1,6 +1,7 @@
 package apply
 
 import (
+	"context"
 	"log"
 
 	"github.com/pkg/errors"
@@ -27,12 +28,12 @@ func MergeMetadataForUpdate(current, updated *uns.Unstructured) error {
 // MergeObjectForUpdate prepares a "desired" object to be updated.
 // Some objects, such as Deployments and Services require
 // some semantic-aware updates
-func MergeObjectForUpdate(current, updated *uns.Unstructured) error {
+func MergeObjectForUpdate(ctx context.Context, current, updated *uns.Unstructured) error {
 	if err := MergeDeploymentForUpdate(current, updated); err != nil {
 		return err
 	}
 
-	if err := MergeDaemonSetForUpdate(current, updated); err != nil {
+	if err := MergeDaemonSetForUpdate(ctx, current, updated); err != nil {
 		return err
 	}
 
@@ -82,10 +83,19 @@ func MergeDeploymentForUpdate(current, updated *uns.Unstructured) error {
 	return nil
 }
 
-// MergeDaemonSetForUpdate merges DaemonSet templates, preserving ptp-security-* volumes
-// from current (existing) DaemonSet. These volumes are dynamically managed by ptpconfig_controller
-// and should not be overwritten when PtpOperatorConfig reconciles the base DaemonSet template.
-func MergeDaemonSetForUpdate(current, updated *uns.Unstructured) error {
+// MergeDaemonSetForUpdate merges DaemonSet updates using context to determine controller:
+// For linuxptp-daemon DaemonSet, it merges non-security and security resources separately.
+//
+// Non-security resources (base volumes, annotations, mounts) always come from updated.
+// Security resources (volumes/annotations/mounts ending with -ptpconfig-sec):
+//   - If PtpConfigController: use security from updated (source of truth for security)
+//   - If PtpOperatorConfigController: preserve security from current (doesn't manage security)
+//
+// This works because:
+//   - PtpConfig gets current, strips security, adds new security, applies with context
+//   - PtpOperatorConfig renders from template (no security), applies with context
+//   - Context explicitly tells merge which controller is reconciling
+func MergeDaemonSetForUpdate(ctx context.Context, current, updated *uns.Unstructured) error {
 	gvk := updated.GroupVersionKind()
 	if gvk.Group == "apps" && gvk.Kind == "DaemonSet" {
 		// Only apply to linuxptp-daemon DaemonSet
@@ -93,18 +103,20 @@ func MergeDaemonSetForUpdate(current, updated *uns.Unstructured) error {
 			return nil
 		}
 
-		// Merge volumes: preserve ptp-security-* from current, add base volumes from updated
-		if err := mergeSecurityVolumes(current, updated); err != nil {
+		// Check which controller is performing the update
+		controllerName, _ := ctx.Value(ControllerNameKey).(string)
+		isPtpConfigController := (controllerName == PtpConfigController)
+
+		// Merge volumes, annotations, and mounts
+		if err := mergeSecurityVolumes(current, updated, isPtpConfigController); err != nil {
 			return err
 		}
 
-		// Merge annotations: preserve ptp-security-* hash annotations from current
-		if err := mergeSecurityAnnotations(current, updated); err != nil {
+		if err := mergeSecurityAnnotations(current, updated, isPtpConfigController); err != nil {
 			return err
 		}
 
-		// Merge volume mounts: preserve ptp-security-* mounts from current
-		if err := mergeSecurityVolumeMounts(current, updated); err != nil {
+		if err := mergeSecurityVolumeMounts(current, updated, isPtpConfigController); err != nil {
 			return err
 		}
 	}
@@ -112,12 +124,13 @@ func MergeDaemonSetForUpdate(current, updated *uns.Unstructured) error {
 	return nil
 }
 
-// mergeSecurityVolumes preserves PTP security volumes from current DaemonSet
-// Security volumes end with "-ptpconfig-sec" suffix and are managed by ptpconfig_controller
-func mergeSecurityVolumes(current, updated *uns.Unstructured) error {
+// mergeSecurityVolumes merges volumes based on which controller is reconciling:
+// - PtpConfigController: use security volumes from updated (source of truth)
+// - PtpOperatorConfigController: preserve security volumes from current
+func mergeSecurityVolumes(current, updated *uns.Unstructured, isPtpConfigController bool) error {
 	currentVolumes, found, err := uns.NestedSlice(current.Object, "spec", "template", "spec", "volumes")
 	if err != nil || !found {
-		return err
+		currentVolumes = []interface{}{}
 	}
 
 	updatedVolumes, found, err := uns.NestedSlice(updated.Object, "spec", "template", "spec", "volumes")
@@ -128,17 +141,7 @@ func mergeSecurityVolumes(current, updated *uns.Unstructured) error {
 		updatedVolumes = []interface{}{}
 	}
 
-	// Log all volumes in current for debugging
-	log.Printf("MergeDaemonSet: Current DaemonSet has %d volumes", len(currentVolumes))
-	for _, vol := range currentVolumes {
-		if volMap, ok := vol.(map[string]interface{}); ok {
-			if name, ok := volMap["name"].(string); ok {
-				log.Printf("  MergeDaemonSet: current volume: %s", name)
-			}
-		}
-	}
-
-	// Extract security volumes from current (volumes ending with "-ptpconfig-sec")
+	// Extract security volumes from current
 	var currentSecurityVolumes []interface{}
 	for _, vol := range currentVolumes {
 		volMap, ok := vol.(map[string]interface{})
@@ -149,91 +152,58 @@ func mergeSecurityVolumes(current, updated *uns.Unstructured) error {
 		if !ok {
 			continue
 		}
-
-		// Check if it's a security volume (ends with "-ptpconfig-sec")
+		// Security volumes end with "-ptpconfig-sec"
 		if len(name) >= 14 && name[len(name)-14:] == "-ptpconfig-sec" {
-			log.Printf("MergeDaemonSet: Found security volume in current: %s", name)
 			currentSecurityVolumes = append(currentSecurityVolumes, vol)
 		}
 	}
 
-	// Extract security volumes from updated (volumes ending with "-ptpconfig-sec")
+	// Extract non-security and security volumes from updated
+	var nonSecurityVolumes []interface{}
 	var updatedSecurityVolumes []interface{}
+
 	for _, vol := range updatedVolumes {
 		volMap, ok := vol.(map[string]interface{})
 		if !ok {
+			nonSecurityVolumes = append(nonSecurityVolumes, vol)
 			continue
 		}
 		name, ok := volMap["name"].(string)
 		if !ok {
+			nonSecurityVolumes = append(nonSecurityVolumes, vol)
 			continue
 		}
 
 		// Check if it's a security volume (ends with "-ptpconfig-sec")
 		if len(name) >= 14 && name[len(name)-14:] == "-ptpconfig-sec" {
-			log.Printf("MergeDaemonSet: Found security volume in updated: %s", name)
 			updatedSecurityVolumes = append(updatedSecurityVolumes, vol)
+		} else {
+			nonSecurityVolumes = append(nonSecurityVolumes, vol)
 		}
 	}
 
-	// Check if PtpConfig has reconciled (look for marker annotation)
-	updatedAnnotations, _, _ := uns.NestedStringMap(updated.Object, "spec", "template", "metadata", "annotations")
-	ptpConfigReconciled := false
-	if updatedAnnotations != nil {
-		if _, exists := updatedAnnotations["ptp.openshift.io/ptpconfig-reconciled"]; exists {
-			ptpConfigReconciled = true
-		}
-	}
-
-	// Determine which security volumes to use
-	var securityVolumesToUse []interface{}
-	if len(updatedSecurityVolumes) > 0 {
-		// PtpConfig is updating - use volumes from updated
-		log.Printf("MergeDaemonSet: Using %d security volume(s) from updated (PtpConfig reconciliation)", len(updatedSecurityVolumes))
-		securityVolumesToUse = updatedSecurityVolumes
-	} else if ptpConfigReconciled {
-		// PtpConfig reconciled but removed all volumes (marker present, 0 volumes)
-		log.Printf("MergeDaemonSet: PtpConfig reconciled with 0 security volumes (all sa_file removed)")
-		securityVolumesToUse = []interface{}{} // Explicitly empty - don't preserve from current
-	} else if len(currentSecurityVolumes) > 0 {
-		// PtpOperatorConfig is updating - preserve volumes from current
-		log.Printf("MergeDaemonSet: Preserving %d security volume(s) from current (PtpOperatorConfig reconciliation)", len(currentSecurityVolumes))
-		securityVolumesToUse = currentSecurityVolumes
+	// Determine which security volumes to use based on controller
+	var securityVolumes []interface{}
+	if isPtpConfigController {
+		// PtpConfig is source of truth for security - use updated (even if empty)
+		log.Printf("MergeDaemonSet: PtpConfig reconciling, using %d security volume(s) from updated", len(updatedSecurityVolumes))
+		securityVolumes = updatedSecurityVolumes
 	} else {
-		// No security volumes anywhere
-		log.Printf("MergeDaemonSet: No security volumes in current or updated")
-		return nil
+		// PtpOperatorConfig doesn't manage security - preserve from current
+		log.Printf("MergeDaemonSet: PtpOperatorConfig reconciling, preserving %d security volume(s) from current", len(currentSecurityVolumes))
+		securityVolumes = currentSecurityVolumes
 	}
 
-	// Build merged volumes: base volumes from updated + security volumes
-	mergedVolumes := []interface{}{}
-	for _, vol := range updatedVolumes {
-		volMap, ok := vol.(map[string]interface{})
-		if !ok {
-			mergedVolumes = append(mergedVolumes, vol)
-			continue
-		}
-		name, ok := volMap["name"].(string)
-		if !ok {
-			mergedVolumes = append(mergedVolumes, vol)
-			continue
-		}
-
-		// Skip security volumes - we'll add from our chosen set
-		if len(name) >= 14 && name[len(name)-14:] == "-ptpconfig-sec" {
-			continue
-		}
-		mergedVolumes = append(mergedVolumes, vol)
-	}
-
-	// Add security volumes
-	mergedVolumes = append(mergedVolumes, securityVolumesToUse...)
+	// Build merged volumes: non-security from updated + security (from updated or current)
+	mergedVolumes := append(nonSecurityVolumes, securityVolumes...)
 
 	return uns.SetNestedSlice(updated.Object, mergedVolumes, "spec", "template", "spec", "volumes")
 }
 
-// mergeSecurityAnnotations preserves ptp.openshift.io/secret-hash-* annotations from current
-func mergeSecurityAnnotations(current, updated *uns.Unstructured) error {
+// mergeSecurityAnnotations merges annotations based on which controller is reconciling:
+// - PtpConfigController: use security annotations from updated
+// - PtpOperatorConfigController: preserve security annotations from current
+func mergeSecurityAnnotations(current, updated *uns.Unstructured, isPtpConfigController bool) error {
 	currentAnnotations, found, err := uns.NestedStringMap(current.Object, "spec", "template", "metadata", "annotations")
 	if err != nil || !found {
 		currentAnnotations = make(map[string]string)
@@ -247,41 +217,37 @@ func mergeSecurityAnnotations(current, updated *uns.Unstructured) error {
 		updatedAnnotations = make(map[string]string)
 	}
 
-	// Check if PtpConfig reconciled (marker annotation)
-	ptpConfigReconciled := false
-	if _, exists := updatedAnnotations["ptp.openshift.io/ptpconfig-reconciled"]; exists {
-		ptpConfigReconciled = true
-	}
+	// Extract security annotations from current
+	prefix := "ptp.openshift.io/secret-hash-"
+	currentSecurityAnnotations := make(map[string]string)
 
-	// Count security annotations in updated
-	updatedHasSecurityAnnotations := false
-	for k := range updatedAnnotations {
-		if len(k) > 29 && k[:29] == "ptp.openshift.io/secret-hash-" {
-			updatedHasSecurityAnnotations = true
-			break
+	for k, v := range currentAnnotations {
+		if len(k) > len(prefix) && k[:len(prefix)] == prefix {
+			currentSecurityAnnotations[k] = v
 		}
 	}
 
-	if updatedHasSecurityAnnotations || ptpConfigReconciled {
-		// PtpConfig reconciled - use updated's annotations
-		log.Printf("MergeDaemonSet: Using security annotations from updated (PtpConfig reconciled)")
-		return uns.SetNestedStringMap(updated.Object, updatedAnnotations, "spec", "template", "metadata", "annotations")
-	}
-
-	// PtpOperatorConfig reconciled - preserve security annotations from current
-	prefix := "ptp.openshift.io/secret-hash-"
-	for k, v := range currentAnnotations {
-		if len(k) > len(prefix) && k[:len(prefix)] == prefix {
+	// Determine which security annotations to use based on controller
+	if isPtpConfigController {
+		// PtpConfig is source of truth for security - use updated (even if empty)
+		log.Printf("MergeDaemonSet: PtpConfig reconciling, using security annotations from updated")
+		// updatedAnnotations already has the new values, nothing to do
+	} else {
+		// PtpOperatorConfig doesn't manage security - preserve from current
+		log.Printf("MergeDaemonSet: PtpOperatorConfig reconciling, preserving security annotations from current")
+		// Preserve current security annotations
+		for k, v := range currentSecurityAnnotations {
 			updatedAnnotations[k] = v
 		}
 	}
-	log.Printf("MergeDaemonSet: Preserved security annotations from current (PtpOperatorConfig reconciled)")
 
 	return uns.SetNestedStringMap(updated.Object, updatedAnnotations, "spec", "template", "metadata", "annotations")
 }
 
-// mergeSecurityVolumeMounts preserves security volume mounts from current or updated
-func mergeSecurityVolumeMounts(current, updated *uns.Unstructured) error {
+// mergeSecurityVolumeMounts merges volume mounts based on which controller is reconciling:
+// - PtpConfigController: use security mounts from updated
+// - PtpOperatorConfigController: preserve security mounts from current
+func mergeSecurityVolumeMounts(current, updated *uns.Unstructured, isPtpConfigController bool) error {
 	currentContainers, found, err := uns.NestedSlice(current.Object, "spec", "template", "spec", "containers")
 	if err != nil || !found {
 		return err
@@ -346,32 +312,16 @@ func mergeSecurityVolumeMounts(current, updated *uns.Unstructured) error {
 		}
 	}
 
-	// Check if PtpConfig reconciled (marker annotation)
-	updatedAnnotations, _, _ := uns.NestedStringMap(updated.Object, "spec", "template", "metadata", "annotations")
-	ptpConfigReconciled := false
-	if updatedAnnotations != nil {
-		if _, exists := updatedAnnotations["ptp.openshift.io/ptpconfig-reconciled"]; exists {
-			ptpConfigReconciled = true
-		}
-	}
-
-	// Determine which security mounts to use
+	// Determine which security mounts to use based on controller
 	var securityMountsToUse []interface{}
-	if len(updatedSecurityMounts) > 0 {
-		// PtpConfig is updating - use mounts from updated
-		log.Printf("MergeDaemonSet: Using %d security mount(s) from updated", len(updatedSecurityMounts))
+	if isPtpConfigController {
+		// PtpConfig is source of truth for security - use updated (even if empty)
+		log.Printf("MergeDaemonSet: PtpConfig reconciling, using %d security mount(s) from updated", len(updatedSecurityMounts))
 		securityMountsToUse = updatedSecurityMounts
-	} else if ptpConfigReconciled {
-		// PtpConfig reconciled but removed all mounts
-		log.Printf("MergeDaemonSet: PtpConfig reconciled with 0 security mounts (all sa_file removed)")
-		securityMountsToUse = []interface{}{} // Explicitly empty
-	} else if len(currentSecurityMounts) > 0 {
-		// PtpOperatorConfig is updating - preserve mounts from current
-		log.Printf("MergeDaemonSet: Preserving %d security mount(s) from current", len(currentSecurityMounts))
-		securityMountsToUse = currentSecurityMounts
 	} else {
-		// No security mounts
-		return nil
+		// PtpOperatorConfig doesn't manage security - preserve from current
+		log.Printf("MergeDaemonSet: PtpOperatorConfig reconciling, preserving %d security mount(s) from current", len(currentSecurityMounts))
+		securityMountsToUse = currentSecurityMounts
 	}
 
 	// Merge mounts for linuxptp-daemon-container

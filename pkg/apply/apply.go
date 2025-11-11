@@ -14,6 +14,20 @@ import (
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+// Context keys for passing controller information
+type contextKey string
+
+const (
+	// ControllerNameKey is used to pass the controller name through context
+	ControllerNameKey contextKey = "controller-name"
+)
+
+// Controller name constants
+const (
+	PtpConfigController         = "ptpconfig"
+	PtpOperatorConfigController = "ptpoperatorconfig"
+)
+
 // ApplyObject applies the desired object against the apiserver,
 // merging it with any existing objects if already present.
 func ApplyObject(ctx context.Context, client k8sclient.Client, obj *uns.Unstructured) error {
@@ -50,7 +64,7 @@ func ApplyObject(ctx context.Context, client k8sclient.Client, obj *uns.Unstruct
 	}
 
 	// Merge the desired object with what actually exists
-	if err := MergeObjectForUpdate(existing, obj); err != nil {
+	if err := MergeObjectForUpdate(ctx, existing, obj); err != nil {
 		return errors.Wrapf(err, "could not merge object %s with existing", objDesc)
 	}
 

@@ -21,8 +21,8 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"reflect"
 	"path/filepath"
+	"reflect"
 	"sort"
 
 	"github.com/go-logr/logr"
@@ -414,9 +414,30 @@ func (r *PtpConfigReconciler) syncLinuxptpDaemonSecrets(ctx context.Context, ptp
 		}
 	}
 
-	// Note: No need to deduplicate - webhook validation ensures no conflicts
-	// (same sa_file across PtpConfigs must use same secret)
-	glog.Infof("Found %d secret mount(s) to apply", len(mounts))
+	// Deduplicate by sa_file path
+	// Multiple PtpConfigs can use the same sa_file + secret (webhook allows this)
+	// but we only need to mount each unique sa_file once
+	uniqueMounts := make(map[string]secretMount) // key is sa_file path
+	for _, mount := range mounts {
+		if existing, found := uniqueMounts[mount.saFilePath]; found {
+			// Same sa_file already exists - verify it's the same secret (should be ensured by webhook)
+			if existing.secretName != mount.secretName {
+				glog.Warningf("Inconsistent secret for sa_file %s: existing=%s, new=%s (should not happen due to webhook validation)",
+					mount.saFilePath, existing.secretName, mount.secretName)
+			}
+			// Keep the first one, skip duplicate
+			continue
+		}
+		uniqueMounts[mount.saFilePath] = mount
+	}
+
+	// Convert map back to slice
+	mounts = make([]secretMount, 0, len(uniqueMounts))
+	for _, mount := range uniqueMounts {
+		mounts = append(mounts, mount)
+	}
+
+	glog.Infof("Found %d unique secret mount(s) to apply (after deduplication)", len(mounts))
 
 	// Always update DaemonSet, even if mounts is empty
 	// This ensures volumes are removed when sa_file is deleted from PtpConfigs
@@ -446,24 +467,20 @@ func (r *PtpConfigReconciler) syncLinuxptpDaemonSecrets(ctx context.Context, ptp
 		injectPtpSecurityVolume(daemonSet, mount.secretName, mount.saFilePath, mount.secretHash, mount.secretKey)
 	}
 
-	// 5. Add marker annotation to indicate PtpConfig has reconciled
-	// This helps the merge function distinguish between PtpConfig removing volumes
-	// vs PtpOperatorConfig not touching volumes
-	if daemonSet.Spec.Template.Annotations == nil {
-		daemonSet.Spec.Template.Annotations = make(map[string]string)
-	}
-	daemonSet.Spec.Template.Annotations["ptp.openshift.io/ptpconfig-reconciled"] = "true"
-
-	// 6. Convert to Unstructured and apply with merge (like PtpOperatorConfig does)
+	// 5. Convert to Unstructured and apply with merge (like PtpOperatorConfig does)
 	scheme := kscheme.Scheme
 	updated := &uns.Unstructured{}
 	if err := scheme.Convert(daemonSet, updated, nil); err != nil {
 		return fmt.Errorf("failed to convert DaemonSet to Unstructured: %v", err)
 	}
 
+	// Set context to indicate PtpConfig is the controller performing the update
+	// This tells the merge function to use security resources from updated
+	ctxWithController := context.WithValue(ctx, apply.ControllerNameKey, apply.PtpConfigController)
+
 	// Use apply.ApplyObject which will call MergeObjectForUpdate
 	// This ensures both PtpConfig and PtpOperatorConfig updates are preserved
-	if err := apply.ApplyObject(ctx, r.Client, updated); err != nil {
+	if err := apply.ApplyObject(ctxWithController, r.Client, updated); err != nil {
 		return fmt.Errorf("failed to apply DaemonSet: %v", err)
 	}
 

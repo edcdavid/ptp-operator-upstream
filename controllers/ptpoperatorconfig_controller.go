@@ -269,6 +269,10 @@ func (r *PtpOperatorConfigReconciler) syncLinuxptpDaemon(ctx context.Context, de
 		return fmt.Errorf("failed to render linuxptp daemon manifest: %v", err)
 	}
 
+	// Set context to indicate PtpOperatorConfig is the controller
+	// This tells the merge function to preserve security resources from current DaemonSet
+	ctxWithController := context.WithValue(ctx, apply.ControllerNameKey, apply.PtpOperatorConfigController)
+
 	for _, obj := range objs {
 		obj, err = r.setDaemonNodeSelector(defaultCfg, obj)
 		if err != nil {
@@ -278,7 +282,7 @@ func (r *PtpOperatorConfigReconciler) syncLinuxptpDaemon(ctx context.Context, de
 		if err = controllerutil.SetControllerReference(defaultCfg, obj, r.Scheme); err != nil {
 			return fmt.Errorf("failed to set owner reference for daemon: %v", err)
 		}
-		if err = apply.ApplyObject(ctx, r.Client, obj); err != nil {
+		if err = apply.ApplyObject(ctxWithController, r.Client, obj); err != nil {
 			return fmt.Errorf("failed to apply object %v with err: %v", obj, err)
 		}
 	}
