@@ -7,16 +7,31 @@ All CI images built from these Dockerfiles include an `io.openshift.build.commit
 - **Dockerfile.lptpd**: Points to the linuxptp-daemon commit from github.com/k8snetworkplumbingwg/linuxptp-daemon
 - **Dockerfile.cep**: Points to the cloud-event-proxy commit from github.com/redhat-cne/cloud-event-proxy  
 - **Dockerfile.krp**: Points to the kube-rbac-proxy commit from github.com/openshift/kube-rbac-proxy
-- **Dockerfile.ptpop**: Points to the ptp-operator commit from github.com/k8snetworkplumbingwg/ptp-operator
+- **Dockerfile.ptpop**: Points to the ptp-operator commit from **your current fork's remote origin URL**
 
-The commit hash is automatically captured during the build process from the cloned/copied repository.
+The commit hash is automatically captured during the build process:
+- For cloned repositories (lptpd, cep, krp): Captured from the cloned repo's HEAD
+- For ptpop: Captured from the parent directory's git repository (your working copy)
 
-### Overriding Commit Hash
+### Auto-Detection for ptp-operator (ptpop)
 
-You can optionally override the commit hash by passing it as a build argument:
+When building the ptpop image, the Makefile automatically:
+1. Detects the current commit hash from your git repository: `git rev-parse HEAD`
+2. Detects your fork's remote URL: `git config --get remote.origin.url`
+3. Converts SSH URLs to HTTPS format for the label
+
+This means if you're working on a fork like `https://github.com/yourname/ptp-operator`, the label will correctly point to your fork's commit.
+
+### Overriding Commit Information
+
+You can optionally override the commit hash and/or remote URL:
 
 ```bash
-make build-image VAR=lptpd COMMIT_HASH=abc123def456
+# Override commit hash only
+make build-image VAR=ptpop COMMIT_HASH=abc123def456
+
+# Override both commit hash and repository URL
+make build-image VAR=ptpop COMMIT_HASH=abc123def456 GIT_REMOTE_URL=https://github.com/yourname/ptp-operator
 ``` - Container Image Builder
 
 This directory contains tools and scripts for building all container images required to run the PTP operator.

@@ -40,9 +40,28 @@ podman-push-%:
 
 build-image:
 	podman manifest create ${IMG_PREFIX}:$(VAR)
-	# Optionally pass COMMIT_HASH as build argument if set
-	$(eval BUILD_ARGS := $(if $(COMMIT_HASH),--build-arg COMMIT_HASH=$(COMMIT_HASH),))
-	podman build --no-cache --platform $(PLATFORM) $(BUILD_ARGS) -f Dockerfile.$(VAR)  --manifest ${IMG_PREFIX}:$(VAR)  ..
+	# For ptpop, get commit hash and remote URL from parent git repository
+	@if [ "$(VAR)" = "ptpop" ]; then \
+		if [ -z "$(COMMIT_HASH)" ]; then \
+			COMMIT_HASH=$$(cd .. && git rev-parse HEAD 2>/dev/null || echo "unknown"); \
+		else \
+			COMMIT_HASH=$(COMMIT_HASH); \
+		fi; \
+		if [ -z "$(GIT_REMOTE_URL)" ]; then \
+			GIT_REMOTE_URL=$$(cd .. && git config --get remote.origin.url 2>/dev/null | sed 's/\.git$$//' | sed 's/git@github.com:/https:\/\/github.com\//' || echo "https://github.com/k8snetworkplumbingwg/ptp-operator"); \
+		else \
+			GIT_REMOTE_URL=$(GIT_REMOTE_URL); \
+		fi; \
+		echo "Building with COMMIT_HASH=$$COMMIT_HASH from $$GIT_REMOTE_URL"; \
+		podman build --no-cache --platform $(PLATFORM) \
+			--build-arg COMMIT_HASH=$$COMMIT_HASH \
+			--build-arg GIT_REMOTE_URL=$$GIT_REMOTE_URL \
+			-f Dockerfile.$(VAR) --manifest ${IMG_PREFIX}:$(VAR) ..; \
+	else \
+		BUILD_ARGS=""; \
+		if [ -n "$(COMMIT_HASH)" ]; then BUILD_ARGS="$$BUILD_ARGS --build-arg COMMIT_HASH=$(COMMIT_HASH)"; fi; \
+		podman build --no-cache --platform $(PLATFORM) $$BUILD_ARGS -f Dockerfile.$(VAR) --manifest ${IMG_PREFIX}:$(VAR) ..; \
+	fi
 
 clean-image:
 	podman image rm ${IMG_PREFIX}:$(VAR) || true
