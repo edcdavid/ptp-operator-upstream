@@ -1,4 +1,23 @@
-# PTP Tools - Container Image Builder
+# PTP Tools
+
+## Build Commit Labels
+
+All CI images built from these Dockerfiles include an `io.openshift.build.commit.url` label that points to the exact commit of the source code compiled into the image:
+
+- **Dockerfile.lptpd**: Points to the linuxptp-daemon commit from github.com/k8snetworkplumbingwg/linuxptp-daemon
+- **Dockerfile.cep**: Points to the cloud-event-proxy commit from github.com/redhat-cne/cloud-event-proxy  
+- **Dockerfile.krp**: Points to the kube-rbac-proxy commit from github.com/openshift/kube-rbac-proxy
+- **Dockerfile.ptpop**: Points to the ptp-operator commit from github.com/k8snetworkplumbingwg/ptp-operator
+
+The commit hash is automatically captured during the build process from the cloned/copied repository.
+
+### Overriding Commit Hash
+
+You can optionally override the commit hash by passing it as a build argument:
+
+```bash
+make build-image VAR=lptpd COMMIT_HASH=abc123def456
+``` - Container Image Builder
 
 This directory contains tools and scripts for building all container images required to run the PTP operator.
 

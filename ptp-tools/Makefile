@@ -40,7 +40,9 @@ podman-push-%:
 
 build-image:
 	podman manifest create ${IMG_PREFIX}:$(VAR)
-	podman build --no-cache --platform $(PLATFORM) -f Dockerfile.$(VAR)  --manifest ${IMG_PREFIX}:$(VAR)  ..
+	# Optionally pass COMMIT_HASH as build argument if set
+	$(eval BUILD_ARGS := $(if $(COMMIT_HASH),--build-arg COMMIT_HASH=$(COMMIT_HASH),))
+	podman build --no-cache --platform $(PLATFORM) $(BUILD_ARGS) -f Dockerfile.$(VAR)  --manifest ${IMG_PREFIX}:$(VAR)  ..
 
 clean-image:
 	podman image rm ${IMG_PREFIX}:$(VAR) || true

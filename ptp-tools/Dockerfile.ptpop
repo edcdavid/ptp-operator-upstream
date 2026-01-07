@@ -4,16 +4,28 @@ COPY .. .
 ENV GO111MODULE=off
 ENV GOMAXPROCS=16
 
+# Capture the commit hash from the copied repository
+RUN if [ -d .git ]; then git rev-parse HEAD > /tmp/COMMIT_HASH; else echo "unknown" > /tmp/COMMIT_HASH; fi
+
 RUN make -j 16
 
 FROM quay.io/centos/centos:stream9
+
+ARG COMMIT_HASH
+
 COPY --from=builder /go/src/github.com/k8snetworkplumbingwg/ptp-operator/build/_output/bin/ptp-operator /usr/local/bin/
 COPY --from=builder /go/src/github.com/k8snetworkplumbingwg/ptp-operator/manifests /manifests
+COPY --from=builder /tmp/COMMIT_HASH /tmp/COMMIT_HASH
 COPY bindata /bindata
+
+# If COMMIT_HASH not provided as build-arg, read it from the file
+RUN if [ -z "$COMMIT_HASH" ]; then COMMIT_HASH=$(cat /tmp/COMMIT_HASH); fi && \
+    echo "Commit: $COMMIT_HASH"
 
 LABEL io.k8s.display-name="OpenShift ptp-operator" \
       io.k8s.description="This is a component that manages cluster PTP configuration." \
       io.openshift.tags="openshift,ptp" \
+      io.openshift.build.commit.url="https://github.com/k8snetworkplumbingwg/ptp-operator/commit/${COMMIT_HASH:-unknown}" \
       com.redhat.delivery.appregistry=true \
       maintainer="PTP Dev Team <ptp-dev@redhat.com>"
 
