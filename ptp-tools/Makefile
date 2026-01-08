@@ -51,17 +51,17 @@ ifeq ($(VAR),ptpop)
 		-f Dockerfile.$(VAR) --manifest ${IMG_PREFIX}:$(VAR) ..
 else ifeq ($(VAR),lptpd)
 	@echo "Extracting commit hash for lptpd from builder stage..."
-	$(eval COMMIT_HASH_VAL := $(if $(COMMIT_HASH),$(COMMIT_HASH),$(shell podman build --platform $(PLATFORM) -f Dockerfile.$(VAR) --target builder .. 2>&1 | grep '###COMMIT_HASH###' | sed -E 's/.*###COMMIT_HASH###([a-f0-9]+)###COMMIT_HASH###.*/\1/' | head -1 || echo "unknown")))
+	$(eval COMMIT_HASH_VAL := $(if $(COMMIT_HASH),$(COMMIT_HASH),$(shell podman build --platform $(PLATFORM) -f Dockerfile.$(VAR) --target builder .. 2>&1 | grep -o '[a-f0-9]\{40\}' | head -1 || echo unknown)))
 	@echo "Building lptpd with COMMIT_HASH=$(COMMIT_HASH_VAL)"
 	podman build --no-cache --platform $(PLATFORM) --build-arg COMMIT_HASH=$(COMMIT_HASH_VAL) -f Dockerfile.$(VAR) --manifest ${IMG_PREFIX}:$(VAR) ..
 else ifeq ($(VAR),cep)
 	@echo "Extracting commit hash for cep from builder stage..."
-	$(eval COMMIT_HASH_VAL := $(if $(COMMIT_HASH),$(COMMIT_HASH),$(shell podman build --platform $(PLATFORM) -f Dockerfile.$(VAR) --target builder .. 2>&1 | grep '###COMMIT_HASH###' | sed -E 's/.*###COMMIT_HASH###([a-f0-9]+)###COMMIT_HASH###.*/\1/' | head -1 || echo "unknown")))
+	$(eval COMMIT_HASH_VAL := $(if $(COMMIT_HASH),$(COMMIT_HASH),$(shell podman build --platform $(PLATFORM) -f Dockerfile.$(VAR) --target builder .. 2>&1 | grep -o '[a-f0-9]\{40\}' | head -1 || echo unknown)))
 	@echo "Building cep with COMMIT_HASH=$(COMMIT_HASH_VAL)"
 	podman build --no-cache --platform $(PLATFORM) --build-arg COMMIT_HASH=$(COMMIT_HASH_VAL) -f Dockerfile.$(VAR) --manifest ${IMG_PREFIX}:$(VAR) ..
 else ifeq ($(VAR),krp)
 	@echo "Extracting commit hash for krp from builder stage..."
-	$(eval COMMIT_HASH_VAL := $(if $(COMMIT_HASH),$(COMMIT_HASH),$(shell podman build --platform $(PLATFORM) -f Dockerfile.$(VAR) --target builder .. 2>&1 | grep '###COMMIT_HASH###' | sed -E 's/.*###COMMIT_HASH###([a-f0-9]+)###COMMIT_HASH###.*/\1/' | head -1 || echo "unknown")))
+	$(eval COMMIT_HASH_VAL := $(if $(COMMIT_HASH),$(COMMIT_HASH),$(shell podman build --platform $(PLATFORM) -f Dockerfile.$(VAR) --target builder .. 2>&1 | grep -o '[a-f0-9]\{40\}' | head -1 || echo unknown)))
 	@echo "Building krp with COMMIT_HASH=$(COMMIT_HASH_VAL)"
 	podman build --no-cache --platform $(PLATFORM) --build-arg COMMIT_HASH=$(COMMIT_HASH_VAL) -f Dockerfile.$(VAR) --manifest ${IMG_PREFIX}:$(VAR) ..
 else
