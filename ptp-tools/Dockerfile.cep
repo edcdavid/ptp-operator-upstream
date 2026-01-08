@@ -9,26 +9,26 @@ ENV GOMAXPROCS=16
 WORKDIR /go/src/github.com/redhat-cne/cloud-event-proxy
 RUN git clone -b main https://github.com/redhat-cne/cloud-event-proxy.git /go/src/github.com/redhat-cne/cloud-event-proxy && \
     cd /go/src/github.com/redhat-cne/cloud-event-proxy && \
-    git rev-parse HEAD > /tmp/COMMIT_HASH
+    COMMIT_HASH=$(git rev-parse HEAD) && \
+    echo "COMMIT_HASH=$COMMIT_HASH" && \
+    echo "###COMMIT_HASH###$COMMIT_HASH###COMMIT_HASH###" && \
+    echo "$COMMIT_HASH" > /tmp/COMMIT_HASH
 
 RUN hack/build-go.sh
 
 FROM quay.io/centos/centos:stream9
 
-ARG COMMIT_HASH
+ARG COMMIT_HASH=unknown
 
 COPY --from=builder /go/src/github.com/redhat-cne/cloud-event-proxy/build/cloud-event-proxy /
 COPY --from=builder /go/src/github.com/redhat-cne/cloud-event-proxy/plugins/*.so /plugins/
-COPY --from=builder /tmp/COMMIT_HASH /tmp/COMMIT_HASH
 
-# If COMMIT_HASH not provided as build-arg, read it from the file
-RUN if [ -z "$COMMIT_HASH" ]; then COMMIT_HASH=$(cat /tmp/COMMIT_HASH); fi && \
-    echo "Commit: $COMMIT_HASH"
+RUN echo "Building with commit: ${COMMIT_HASH}"
 
 LABEL io.k8s.display-name="Cloud Event Proxy" \
       io.k8s.description="This is a component of OpenShift Container Platform and provides a side car to handle cloud events." \
       io.openshift.tags="openshift" \
-      io.openshift.build.commit.url="https://github.com/redhat-cne/cloud-event-proxy/commit/${COMMIT_HASH:-unknown}" \
+      io.openshift.build.commit.url="https://github.com/redhat-cne/cloud-event-proxy/commit/${COMMIT_HASH}" \
       maintainer="PTP Team <ptp-dev@redhat.com>"
 
 ENTRYPOINT ["./cloud-event-proxy"]

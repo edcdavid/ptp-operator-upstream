@@ -10,7 +10,7 @@ All CI images built from these Dockerfiles include an `io.openshift.build.commit
 - **Dockerfile.ptpop**: Points to the ptp-operator commit from **your current fork's remote origin URL**
 
 The commit hash is automatically captured during the build process:
-- For cloned repositories (lptpd, cep, krp): Captured from the cloned repo's HEAD
+- For cloned repositories (lptpd, cep, krp): The Makefile builds the builder stage first, captures the commit hash from the build output, then rebuilds the full image with the commit hash as a build argument
 - For ptpop: Captured from the parent directory's git repository (your working copy)
 
 ### Auto-Detection for ptp-operator (ptpop)

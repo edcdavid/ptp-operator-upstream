@@ -49,6 +49,21 @@ ifeq ($(VAR),ptpop)
 		--build-arg COMMIT_HASH=$(COMMIT_HASH_VAL) \
 		--build-arg GIT_REMOTE_URL=$(GIT_REMOTE_URL_VAL) \
 		-f Dockerfile.$(VAR) --manifest ${IMG_PREFIX}:$(VAR) ..
+else ifeq ($(VAR),lptpd)
+	@echo "Extracting commit hash for lptpd from builder stage..."
+	$(eval COMMIT_HASH_VAL := $(if $(COMMIT_HASH),$(COMMIT_HASH),$(shell podman build --platform $(PLATFORM) -f Dockerfile.$(VAR) --target builder .. 2>&1 | grep '###COMMIT_HASH###' | sed 's/.*###COMMIT_HASH###\([^#]*\)###COMMIT_HASH###.*/\1/' | head -1 || echo "unknown")))
+	@echo "Building lptpd with COMMIT_HASH=$(COMMIT_HASH_VAL)"
+	podman build --no-cache --platform $(PLATFORM) --build-arg COMMIT_HASH=$(COMMIT_HASH_VAL) -f Dockerfile.$(VAR) --manifest ${IMG_PREFIX}:$(VAR) ..
+else ifeq ($(VAR),cep)
+	@echo "Extracting commit hash for cep from builder stage..."
+	$(eval COMMIT_HASH_VAL := $(if $(COMMIT_HASH),$(COMMIT_HASH),$(shell podman build --platform $(PLATFORM) -f Dockerfile.$(VAR) --target builder .. 2>&1 | grep '###COMMIT_HASH###' | sed 's/.*###COMMIT_HASH###\([^#]*\)###COMMIT_HASH###.*/\1/' | head -1 || echo "unknown")))
+	@echo "Building cep with COMMIT_HASH=$(COMMIT_HASH_VAL)"
+	podman build --no-cache --platform $(PLATFORM) --build-arg COMMIT_HASH=$(COMMIT_HASH_VAL) -f Dockerfile.$(VAR) --manifest ${IMG_PREFIX}:$(VAR) ..
+else ifeq ($(VAR),krp)
+	@echo "Extracting commit hash for krp from builder stage..."
+	$(eval COMMIT_HASH_VAL := $(if $(COMMIT_HASH),$(COMMIT_HASH),$(shell podman build --platform $(PLATFORM) -f Dockerfile.$(VAR) --target builder .. 2>&1 | grep '###COMMIT_HASH###' | sed 's/.*###COMMIT_HASH###\([^#]*\)###COMMIT_HASH###.*/\1/' | head -1 || echo "unknown")))
+	@echo "Building krp with COMMIT_HASH=$(COMMIT_HASH_VAL)"
+	podman build --no-cache --platform $(PLATFORM) --build-arg COMMIT_HASH=$(COMMIT_HASH_VAL) -f Dockerfile.$(VAR) --manifest ${IMG_PREFIX}:$(VAR) ..
 else
 	$(eval BUILD_ARGS := $(if $(COMMIT_HASH),--build-arg COMMIT_HASH=$(COMMIT_HASH),))
 	podman build --no-cache --platform $(PLATFORM) $(BUILD_ARGS) -f Dockerfile.$(VAR) --manifest ${IMG_PREFIX}:$(VAR) ..
