@@ -8,5 +8,8 @@ RUN dnf install -y wget tar && \
     dnf clean all && rm -rf prometheus-3.4.2.linux-amd64*
 
 USER 1000
+
+LABEL io.openshift.build.commit.url="https://github.com/prometheus/prometheus/releases/tag/v3.4.2"
+
 ENTRYPOINT ["/usr/local/bin/prometheus"]
 CMD ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.path=/prometheus"]

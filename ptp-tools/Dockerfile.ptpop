@@ -14,6 +14,7 @@ COPY bindata /bindata
 LABEL io.k8s.display-name="OpenShift ptp-operator" \
       io.k8s.description="This is a component that manages cluster PTP configuration." \
       io.openshift.tags="openshift,ptp" \
+      io.openshift.build.commit.url="https://github.com/k8snetworkplumbingwg/ptp-operator/commit/main" \
       com.redhat.delivery.appregistry=true \
       maintainer="PTP Dev Team <ptp-dev@redhat.com>"
 

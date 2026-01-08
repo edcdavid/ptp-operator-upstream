@@ -13,6 +13,7 @@ FROM quay.io/centos/centos:stream9
 LABEL io.k8s.display-name="kube-rbac-proxy" \
       io.k8s.description="This is a proxy, that can perform Kubernetes RBAC authorization." \
       io.openshift.tags="openshift,kubernetes" \
+      io.openshift.build.commit.url="https://github.com/openshift/kube-rbac-proxy/commit/master" \
       summary="" \
       maintainer="OpenShift Monitoring Team <team-monitoring@redhat.com>"
 

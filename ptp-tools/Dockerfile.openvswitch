@@ -11,4 +11,7 @@ ENV container=podman
 
 # Enable systemd as the entrypoint
 STOPSIGNAL SIGRTMIN+3
+
+LABEL io.openshift.build.commit.url="https://github.com/openvswitch/ovs/commit/main"
+
 CMD ["/usr/sbin/init"]

@@ -51,6 +51,15 @@ podman-clean-%:
 
 podman-cleanall: $(foreach v, $(VALUES), podman-clean-$(v))
 
+show-labels:
+	@echo "Commit URL labels for each image:"
+	@echo "  lptpd:      https://github.com/k8snetworkplumbingwg/linuxptp-daemon/commit/main"
+	@echo "  cep:        https://github.com/redhat-cne/cloud-event-proxy/commit/main"
+	@echo "  krp:        https://github.com/openshift/kube-rbac-proxy/commit/master"
+	@echo "  ptpop:      https://github.com/k8snetworkplumbingwg/ptp-operator/commit/main"
+	@echo "  openvswitch: https://github.com/openvswitch/ovs/commit/main"
+	@echo "  prometheus: https://github.com/prometheus/prometheus/releases/tag/v3.4.2"
+
 deploy-all: 
 	./scripts/customize-env.sh ${IMG_PREFIX} ../config/manager
 	cd ../config/manager && $(KUSTOMIZE) edit set image controller=${IMG_PREFIX}:ptpop
