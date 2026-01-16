@@ -144,6 +144,8 @@ var enabledProblems = []string{AlgoOCString,
 	AlgoDualNicBCWithSlavesExtGMString,
 	AlgoDualFollowerString,
 	AlgoDualFollowerExtGMString,
+	AlgoTBCString,
+	AlgoTBCWithSlavesString,
 }
 
 const FirstSolution = 0
@@ -153,7 +155,7 @@ var data solverData
 // indicates the clock roles in the algotithms
 type TestIfClockRoles int
 
-const NumTestClockRoles = 7
+const NumTestClockRoles = 8
 const (
 	Grandmaster TestIfClockRoles = iota
 	Slave1
@@ -162,6 +164,7 @@ const (
 	BC1Slave
 	BC2Master
 	BC2Slave
+	BC1Master2 // Extra master port on same NIC (for TBC scenarios)
 )
 
 const (
@@ -178,6 +181,8 @@ const (
 	AlgoDualNicBCExtGMString           = "DualNicBCExtGM"
 	AlgoBCWithSlavesExtGMString        = "BCWithSlavesExtGM"
 	AlgoDualNicBCWithSlavesExtGMString = "DualNicBCWithSlavesExtGM"
+	AlgoTBCString                      = "TBC"           // Telecom Boundary Clock (WPC NIC with extra master port)
+	AlgoTBCWithSlavesString            = "TBCWithSlaves" // Telecom Boundary Clock with downstream slaves
 )
 
 type ptpDiscoveryRes ptpv1.PtpConfig
@@ -644,6 +649,37 @@ func initAndSolveProblems() {
 		{{int(solver.StepSameNic), 2, 2, 4, solver.Negative}, // step 7 dual nic BC uses 2 different NICs
 			{int(solver.StepSameNic), 2, 0, 6, solver.Negative}}, // OC slave ports must be on different nics
 	}
+
+	// TBC - Telecom Boundary Clock
+	// Similar to BC but with an extra master port on the same WPC NIC
+	// p0: BC1Slave (upstream facing port receiving from GM)
+	// p1: BC1Master (downstream facing master port)
+	// p2: BC1Master2 (extra downstream master port on same WPC NIC)
+	// p3: Grandmaster (external GM connected to p0)
+	data.problems[AlgoTBCString] = &[][][]int{
+		{{int(solver.StepIsWPCNic), 1, 0}},    // step1: p0 must be on WPC NIC
+		{{int(solver.StepSameNic), 2, 0, 1}},  // step2: p1 on same NIC as p0
+		{{int(solver.StepSameNic), 2, 0, 2}},  // step3: p2 on same NIC as p0 (extra master port)
+		{{int(solver.StepSameLan2), 2, 0, 3}}, // step4: p3 (GM) connected to p0 via LAN
+	}
+
+	// TBC with Slaves - Telecom Boundary Clock with downstream OC slaves
+	// p0: Slave1 (downstream OC slave)
+	// p1: BC1Master (downstream facing master port connected to Slave1)
+	// p2: BC1Master2 (extra downstream master port on same WPC NIC)
+	// p3: BC1Slave (upstream facing port receiving from GM)
+	// p4: Grandmaster (external GM connected to p3)
+	data.problems[AlgoTBCWithSlavesString] = &[][][]int{
+		{{int(solver.StepNil), 0, 0}}, // step1: p0 any interface (downstream slave)
+		{{int(solver.StepSameLan2), 2, 0, 1}, // step2: p1 on same LAN as p0
+			{int(solver.StepIsWPCNic), 1, 1}}, // step2: p1 must be on WPC NIC
+		{{int(solver.StepSameNic), 2, 1, 2}}, // step3: p2 on same NIC as p1 (extra master)
+		{{int(solver.StepSameNic), 2, 1, 3}}, // step4: p3 on same NIC as p1 (BC slave port)
+		{{int(solver.StepSameLan2), 2, 3, 4}, // step5: p4 (GM) connected to p3 via LAN
+			{int(solver.StepSameNic), 2, 0, 4, solver.Negative},   // GM must be on different NIC than downstream slave
+			{int(solver.StepSameLan2), 2, 0, 4, solver.Negative}}, // GM and downstream slave on different LANs
+	}
+
 	// Initializing Solution decoding and mapping
 	// allocating all slices
 	for _, name := range enabledProblems {
@@ -724,6 +760,19 @@ func initAndSolveProblems() {
 	(*data.testClockRolesAlgoMapping[AlgoDualNicBCWithSlavesExtGMString])[BC2Slave] = 4
 	(*data.testClockRolesAlgoMapping[AlgoDualNicBCWithSlavesExtGMString])[BC2Master] = 5
 	(*data.testClockRolesAlgoMapping[AlgoDualNicBCWithSlavesExtGMString])[Slave2] = 6
+
+	// TBC - Telecom Boundary Clock (WPC NIC with extra master port)
+	(*data.testClockRolesAlgoMapping[AlgoTBCString])[BC1Slave] = 0
+	(*data.testClockRolesAlgoMapping[AlgoTBCString])[BC1Master] = 1
+	(*data.testClockRolesAlgoMapping[AlgoTBCString])[BC1Master2] = 2
+	(*data.testClockRolesAlgoMapping[AlgoTBCString])[Grandmaster] = 3
+
+	// TBC with Slaves - Telecom Boundary Clock with downstream OC slaves
+	(*data.testClockRolesAlgoMapping[AlgoTBCWithSlavesString])[Slave1] = 0
+	(*data.testClockRolesAlgoMapping[AlgoTBCWithSlavesString])[BC1Master] = 1
+	(*data.testClockRolesAlgoMapping[AlgoTBCWithSlavesString])[BC1Master2] = 2
+	(*data.testClockRolesAlgoMapping[AlgoTBCWithSlavesString])[BC1Slave] = 3
+	(*data.testClockRolesAlgoMapping[AlgoTBCWithSlavesString])[Grandmaster] = 4
 
 	for _, name := range enabledProblems {
 		// Initializing problems
