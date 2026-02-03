@@ -1,0 +1,11 @@
+name: "linuxptp-daemon: PR CI Triggers"
+on:
+  pull_request_target:
+    types: [opened, reopened]
+    paths:
+      - 'linuxptp-daemon/**'
+
+jobs:
+  triggers:
+    uses: k8snetworkplumbingwg/ptp-operator/.github/workflows/_reusable-linuxptp-daemon-pr-ci-triggers.yml@main
+    secrets: inherit

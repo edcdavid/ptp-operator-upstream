@@ -1,0 +1,12 @@
+name: "linuxptp-daemon: Push image on merge to main"
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'linuxptp-daemon/**'
+
+jobs:
+  push-image:
+    uses: k8snetworkplumbingwg/ptp-operator/.github/workflows/_reusable-linuxptp-daemon-image-push.yml@main
+    secrets: inherit

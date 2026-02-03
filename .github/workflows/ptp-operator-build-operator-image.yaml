@@ -1,0 +1,11 @@
+name: "ptp-operator: Deploy Operator Images to GHCR"
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-operator:
+    uses: k8snetworkplumbingwg/ptp-operator/.github/workflows/_reusable-ptp-operator-build-operator-image.yml@main
+    secrets: inherit

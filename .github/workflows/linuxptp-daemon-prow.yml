@@ -1,0 +1,9 @@
+name: "linuxptp-daemon: Prow github actions"
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  prow:
+    uses: k8snetworkplumbingwg/ptp-operator/.github/workflows/_reusable-linuxptp-daemon-prow.yml@main
+    secrets: inherit

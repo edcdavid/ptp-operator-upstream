@@ -1,0 +1,13 @@
+name: "linuxptp-daemon: Go"
+on:
+  push:
+    branches: ["main", "one-repo*", "release-*"]
+    paths:
+      - 'linuxptp-daemon/**'
+  pull_request:
+    paths:
+      - 'linuxptp-daemon/**'
+
+jobs:
+  build:
+    uses: k8snetworkplumbingwg/ptp-operator/.github/workflows/_reusable-linuxptp-daemon-go.yml@main

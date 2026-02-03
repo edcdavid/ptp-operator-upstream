@@ -1,0 +1,13 @@
+name: "linuxptp-daemon: Test"
+on:
+  push:
+    paths:
+      - 'linuxptp-daemon/**'
+  pull_request:
+    paths:
+      - 'linuxptp-daemon/**'
+
+jobs:
+  test:
+    uses: k8snetworkplumbingwg/ptp-operator/.github/workflows/_reusable-linuxptp-daemon-test.yml@main
+    secrets: inherit

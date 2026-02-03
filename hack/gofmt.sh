@@ -1,6 +1,6 @@
 #!/bin/bash
 
-gofmt_command="gofmt -w -s -l `find . -path ./vendor -prune -o -type f -name '*.go' -print`"
+gofmt_command="gofmt -w -s -l `find . -path ./vendor -prune -o -path ./linuxptp-daemon/vendor -prune -o -path ./cloud-event-proxy/vendor -prune -o -type f -name '*.go' -print`"
 res=$(eval ${gofmt_command})
 if [[ -z ${res} ]]; then
 	echo "INFO: gofmt success"

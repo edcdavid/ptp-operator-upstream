@@ -1,0 +1,9 @@
+name: "ptp-operator: CI tests AWS"
+on:
+  pull_request_target:
+    types: [labeled, synchronize]
+
+jobs:
+  aws-ci:
+    uses: k8snetworkplumbingwg/ptp-operator/.github/workflows/_reusable-ptp-operator-aws-ci.yml@main
+    secrets: inherit
