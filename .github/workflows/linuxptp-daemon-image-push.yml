@@ -1,14 +1,4 @@
 name: "linuxptp-daemon: Push image on merge to main"
-
-permissions:
-  contents: read
-  packages: write  # This gives GitHub Actions permission to push to GHCR
-
-env:
-  IMAGE_NAME: ghcr.io/${{ github.repository }}/linuxptp-daemon
-  BUILD_PLATFORMS: linux/amd64
-  image-push-owner: 'k8snetworkplumbingwg'
-
 on:
   push:
     branches:
@@ -17,36 +7,6 @@ on:
       - 'linuxptp-daemon/**'
 
 jobs:
-  build-and-push-image-linuxptp-daemon:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: linuxptp-daemon
-    steps:
-      - name: Check out the repo
-        uses: actions/checkout@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to Docker
-        if: ${{ github.repository_owner == env.image-push-owner }}
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push linuxptp-daemon
-        if: ${{ github.repository_owner == env.image-push-owner }}
-        uses: docker/build-push-action@v5
-        with:
-          context: linuxptp-daemon
-          push: true
-          platforms: ${{ env.BUILD_PLATFORMS }}
-          sbom: false
-          provenance: false
-          tags: |
-            ${{ env.IMAGE_NAME }}:latest
-            ${{ env.IMAGE_NAME }}:${{ github.sha }}
-          file: linuxptp-daemon/Dockerfile
+  push-image:
+    uses: k8snetworkplumbingwg/ptp-operator/.github/workflows/_reusable-linuxptp-daemon-image-push.yml@main
+    secrets: inherit

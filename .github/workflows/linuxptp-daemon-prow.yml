@@ -4,25 +4,6 @@ on:
     types: [created]
 
 jobs:
-  execute:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: jpmcb/prow-github-actions@v1.1.2
-        with:
-          prow-commands: '/assign
-            /unassign
-            /approve
-            /retitle
-            /area
-            /kind
-            /priority
-            /remove
-            /lgtm
-            /close
-            /reopen
-            /lock
-            /milestone
-            /hold
-            /cc
-            /uncc'
-          github-token: "${{ secrets.GITHUB_TOKEN }}"
+  prow:
+    uses: k8snetworkplumbingwg/ptp-operator/.github/workflows/_reusable-linuxptp-daemon-prow.yml@main
+    secrets: inherit
