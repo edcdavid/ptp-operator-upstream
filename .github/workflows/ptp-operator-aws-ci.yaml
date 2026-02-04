@@ -3,7 +3,12 @@ on:
   pull_request_target:
     types: [labeled, synchronize]
 
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
 jobs:
   aws-ci:
-    uses: k8snetworkplumbingwg/ptp-operator/.github/workflows/_reusable-ptp-operator-aws-ci.yml@main
+    uses: ./.github/workflows/_reusable-ptp-operator-aws-ci.yml
     secrets: inherit

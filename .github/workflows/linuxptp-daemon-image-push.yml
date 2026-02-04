@@ -6,7 +6,11 @@ on:
     paths:
       - 'linuxptp-daemon/**'
 
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   push-image:
-    uses: k8snetworkplumbingwg/ptp-operator/.github/workflows/_reusable-linuxptp-daemon-image-push.yml@main
+    uses: ./.github/workflows/_reusable-linuxptp-daemon-image-push.yml
     secrets: inherit

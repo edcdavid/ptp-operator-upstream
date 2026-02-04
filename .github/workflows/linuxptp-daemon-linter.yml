@@ -8,6 +8,10 @@ on:
     paths:
       - 'linuxptp-daemon/**'
 
+permissions:
+  contents: read
+  pull-requests: read
+
 jobs:
   lint:
-    uses: k8snetworkplumbingwg/ptp-operator/.github/workflows/_reusable-linuxptp-daemon-linter.yml@main
+    uses: ./.github/workflows/_reusable-linuxptp-daemon-linter.yml

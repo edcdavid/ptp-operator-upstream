@@ -10,4 +10,4 @@ on:
 
 jobs:
   check:
-    uses: k8snetworkplumbingwg/ptp-operator/.github/workflows/_reusable-linuxptp-daemon-check-go-mod-vendor.yml@main
+    uses: ./.github/workflows/_reusable-linuxptp-daemon-check-go-mod-vendor.yml

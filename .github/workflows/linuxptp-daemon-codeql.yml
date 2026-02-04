@@ -10,6 +10,12 @@ on:
   schedule:
     - cron: '20 21 * * 4'
 
+permissions:
+  security-events: write
+  packages: read
+  actions: read
+  contents: read
+
 jobs:
   analyze:
-    uses: k8snetworkplumbingwg/ptp-operator/.github/workflows/_reusable-linuxptp-daemon-codeql.yml@main
+    uses: ./.github/workflows/_reusable-linuxptp-daemon-codeql.yml

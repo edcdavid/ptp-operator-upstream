@@ -3,4 +3,4 @@ on: [push, pull_request]
 
 jobs:
   validate:
-    uses: k8snetworkplumbingwg/ptp-operator/.github/workflows/_reusable-ptp-operator-validate.yml@main
+    uses: ./.github/workflows/_reusable-ptp-operator-validate.yml

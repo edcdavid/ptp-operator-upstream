@@ -7,5 +7,5 @@ on:
 
 jobs:
   triggers:
-    uses: k8snetworkplumbingwg/ptp-operator/.github/workflows/_reusable-linuxptp-daemon-pr-ci-triggers.yml@main
+    uses: ./.github/workflows/_reusable-linuxptp-daemon-pr-ci-triggers.yml
     secrets: inherit

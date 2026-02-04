@@ -5,7 +5,11 @@ on:
       - main
   workflow_dispatch:
 
+permissions:
+  packages: write
+  contents: read
+
 jobs:
   build-operator:
-    uses: k8snetworkplumbingwg/ptp-operator/.github/workflows/_reusable-ptp-operator-build-operator-image.yml@main
+    uses: ./.github/workflows/_reusable-ptp-operator-build-operator-image.yml
     secrets: inherit

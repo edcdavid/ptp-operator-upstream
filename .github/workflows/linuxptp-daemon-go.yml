@@ -10,4 +10,4 @@ on:
 
 jobs:
   build:
-    uses: k8snetworkplumbingwg/ptp-operator/.github/workflows/_reusable-linuxptp-daemon-go.yml@main
+    uses: ./.github/workflows/_reusable-linuxptp-daemon-go.yml

@@ -5,5 +5,5 @@ on:
 
 jobs:
   prow:
-    uses: k8snetworkplumbingwg/ptp-operator/.github/workflows/_reusable-linuxptp-daemon-prow.yml@main
+    uses: ./.github/workflows/_reusable-linuxptp-daemon-prow.yml
     secrets: inherit
