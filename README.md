@@ -1,10 +1,19 @@
+dummy 
 # PTP Operator
 ## Table of Contents
 
 - [PTP Operator](#ptp-operator)
-- [PtpOperatorConfig](#ptpoperatorconfig)
-- [PtpConfig](#ptpconfig)
-- [Quick Start](#quick-start)
+  - [Table of Contents](#table-of-contents)
+  - [PTP Operator](#ptp-operator-1)
+  - [PtpOperatorConfig](#ptpoperatorconfig)
+    - [Enable PTP events via fast event framework](#enable-ptp-events-via-fast-event-framework)
+      - [Enabling fast events](#enabling-fast-events)
+  - [PtpConfig](#ptpconfig)
+    - [ptpConfig to set up ordinary clock using single interface](#ptpconfig-to-set-up-ordinary-clock-using-single-interface)
+    - [ptpConfig to set up boundary clock using multiple interface](#ptpconfig-to-set-up-boundary-clock-using-multiple-interface)
+      - [ptpConfig to override offset threshold when events are enabled](#ptpconfig-to-override-offset-threshold-when-events-are-enabled)
+      - [ptpConfig to filter 'master offset' and 'delay   filtered' logs](#ptpconfig-to-filter-master-offset-and-delay---filtered-logs)
+  - [Quick Start](#quick-start)
 
 ## PTP Operator
 Ptp Operator, runs in `openshift-ptp` namespace, manages cluster wide PTP configuration. It offers `PtpOperatorConfig` and `PtpConfig` CRDs and creates `linuxptp daemon` to apply node specific PTP config.
