@@ -52,6 +52,14 @@ jobs:
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           path: ptp-operator
 
+      - name: Checkout helper scripts from base repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: main
+          sparse-checkout: .github/scripts
+          path: base-scripts
+
       - name: Debug OIDC Token
         run: |
           echo "=== GitHub Context for OIDC Debug ==="
@@ -105,7 +113,7 @@ jobs:
 
       - name: Wait for instance to be online
         run: |
-          ./ptp-operator/scripts/retry.sh 180 10 sh -c "aws ssm describe-instance-information --query \"InstanceInformationList[?InstanceId=='$instance_id'].PingStatus\" --output text | grep -q 'Online'"
+          ./base-scripts/.github/scripts/retry.sh 180 10 sh -c "aws ssm describe-instance-information --query \"InstanceInformationList[?InstanceId=='$instance_id'].PingStatus\" --output text | grep -q 'Online'"
 
       - name: Run test script
         run: |
@@ -118,7 +126,7 @@ jobs:
 
           ssh-add temp_key
 
-          ./ptp-operator/scripts/retry.sh 60 5 ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null fedora@"$public_ip" uptime
+          ./base-scripts/.github/scripts/retry.sh 60 5 ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null fedora@"$public_ip" uptime
           rsync -r -e "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null" ptp-operator fedora@"$public_ip":~/.
           ssh -o StrictHostKeyChecking=no \
               -o UserKnownHostsFile=/dev/null \
