@@ -1,0 +1,2 @@
+https://github.com/k8snetworkplumbingwg/linuxptp-daemon.git main pkg/linuxptp-daemon/
+https://github.com/redhat-cne/cloud-event-proxy.git main pkg/cloud-event-proxy/
