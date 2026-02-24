@@ -155,6 +155,25 @@ jobs:
               sudo journalctl --no-pager -n 100 --since '5 minutes ago'; \
               echo '=== End of logs ==='; \
               exit \$exit_code"
+      - name: Collect artifacts from VM
+        if: always() && env.public_ip != ''
+        run: |
+            mkdir -p artifacts
+            ssh -i temp_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+              -o ConnectTimeout=10 \
+              fedora@"$public_ip" "sudo chmod -R a+r /tmp/artifacts/ 2>/dev/null" || true
+            rsync -r \
+              -e "ssh -i temp_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10" \
+              fedora@"$public_ip":/tmp/artifacts/ artifacts/ || true
+
+      - name: Upload test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-artifacts-pr${{ github.event.number }}-${{ github.run_id }}
+          path: artifacts/
+          retention-days: 7
+          if-no-files-found: warn
 
       - name: Cleanup - Delete EC2 instance
         if: always()
