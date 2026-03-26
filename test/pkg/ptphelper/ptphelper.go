@@ -1236,6 +1236,14 @@ func IsIntegratedGnssSim() bool {
 	return UseGnssSimulation()
 }
 
+// IsGnssSimConfigured returns true when GNSS simulation env vars are set,
+// indicating the CI environment has a gnss-sim instance available.
+func IsGnssSimConfigured() bool {
+	_, hasDevice := os.LookupEnv("GNSS_SIM_NMEA_DEVICE")
+	_, hasIface := os.LookupEnv("GNSS_SIM_IFACE1")
+	return hasDevice || hasIface
+}
+
 // L2ConfigReportsIntelWPC returns true if L2 discovery reports an Intel WPC subsystem (E810-XXV-4T).
 // Call NormalizeL2IntegratedGnssNICsForTelcoGM first so integrated-GNSS (GNRD) ports are included.
 func L2ConfigReportsIntelWPC(config l2lib.L2Info) bool {

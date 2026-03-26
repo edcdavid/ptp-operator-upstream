@@ -2716,6 +2716,199 @@ var _ = Describe("["+strings.ToLower(DesiredMode.String())+"-serial]", Serial, f
 			})
 		})
 
+		Context("TGMOC - WPC T-GM with downstream OC", func() {
+			BeforeEach(func() {
+				if fullConfig.PtpModeDesired != testconfig.TelcoGMOC {
+					Skip("test valid only for TGMOC mode")
+				}
+				if !ptphelper.IsGnssSimulatedCI() {
+					Skip("test valid only when gnss-sim PTY is used (hardware GNSS not present on cluster)")
+				}
+				By("Refreshing configuration", func() {
+					ptphelper.WaitForPtpDaemonToExist()
+					fullConfig = testconfig.GetFullDiscoveredConfig(pkg.PtpLinuxDaemonNamespace, true)
+					podsRunningPTP4l, err := testconfig.GetPodsRunningPTP4l(&fullConfig)
+					Expect(err).NotTo(HaveOccurred())
+					ptphelper.WaitForPtpDaemonToBeReady(podsRunningPTP4l)
+				})
+			})
+
+			It("Verifies WPC T-GM process status and clock class", func() {
+				By("checking that gnss-sim is healthy")
+				Eventually(func() bool {
+					return ptphelper.GNSSSimIsHealthy()
+				}, pkg.TimeoutIn1Minute, 5*time.Second).Should(BeTrue(),
+					"gnss-sim health check failed")
+
+				gmPtpConfig := (*ptpv1.PtpConfig)(fullConfig.DiscoveredGrandMasterPtpConfig)
+				Expect(gmPtpConfig).ToNot(BeNil(), "GM PtpConfig was not discovered")
+
+				gmPod, err := ptphelper.GetPTPPodWithPTPConfig(gmPtpConfig)
+				Expect(err).ToNot(HaveOccurred())
+
+				By("checking GM required processes (ts2phc, ptp4l, phc2sys)")
+				processesArr := [...]string{"phc2sys", "ts2phc", "ptp4l"}
+				for _, val := range processesArr {
+					logMatches, pErr := pods.GetPodLogsRegex(openshiftPtpNamespace, gmPod.Name, pkg.PtpContainerName, val, true, pkg.TimeoutIn1Minute)
+					Expect(pErr).To(BeNil(), fmt.Sprintf("Error looking for %s", val))
+					Expect(logMatches).ToNot(BeEmpty(), fmt.Sprintf("Expected %s to be running on GM", val))
+				}
+
+				By("checking GM clock class is Locked (CC6)")
+				Eventually(func() bool {
+					buf, _, _ := pods.ExecCommand(client.Client, true, gmPod, pkg.PtpContainerName, []string{"curl", pkg.MetricsEndPoint})
+					return checkClockClassInMetrics(buf.String(), "6")
+				}, pkg.TimeoutIn5Minutes, 5*time.Second).Should(BeTrue(),
+					"Expected GM clock class to reach 6 (LOCKED)")
+			})
+
+			It("Verifies downstream OC slave is synchronized to WPC T-GM", func() {
+				slave1PtpConfig := (*ptpv1.PtpConfig)(fullConfig.DiscoveredSlave1PtpConfig)
+				if slave1PtpConfig == nil {
+					Skip("Slave1 PtpConfig not discovered - BCWithSlaves solution not available")
+				}
+
+				By("checking downstream OC receives PTP and reaches LOCKED state")
+				aLabel := pkg.PtpClockUnderTestNodeLabel
+				masterIDBc1, err := ptphelper.GetClockIDMaster(pkg.PtpWPCGrandMasterPolicyName, &aLabel, nil, false)
+				if err != nil {
+					logrus.Warnf("Could not get GM clock ID, skipping master ID check: %v", err)
+				}
+				err = ptptesthelper.BasicClockSyncCheck(fullConfig, slave1PtpConfig,
+					&masterIDBc1, metrics.MetricClockStateLocked, metrics.MetricRoleSlave, true)
+				Expect(err).To(BeNil(), "OC slave should be synchronized to WPC T-GM")
+			})
+		})
+
+		Context("TGMBC - WPC T-GM with downstream BC", func() {
+			BeforeEach(func() {
+				if fullConfig.PtpModeDesired != testconfig.TelcoGMBC {
+					Skip("test valid only for TGMBC mode")
+				}
+				if !ptphelper.IsGnssSimulatedCI() {
+					Skip("test valid only when gnss-sim PTY is used (hardware GNSS not present on cluster)")
+				}
+				By("Refreshing configuration", func() {
+					ptphelper.WaitForPtpDaemonToExist()
+					fullConfig = testconfig.GetFullDiscoveredConfig(pkg.PtpLinuxDaemonNamespace, true)
+					podsRunningPTP4l, err := testconfig.GetPodsRunningPTP4l(&fullConfig)
+					Expect(err).NotTo(HaveOccurred())
+					ptphelper.WaitForPtpDaemonToBeReady(podsRunningPTP4l)
+				})
+			})
+
+			It("Verifies WPC T-GM and downstream BC reach Locked clock class", func() {
+				By("checking that gnss-sim is healthy")
+				Eventually(func() bool {
+					return ptphelper.GNSSSimIsHealthy()
+				}, pkg.TimeoutIn1Minute, 5*time.Second).Should(BeTrue(),
+					"gnss-sim health check failed")
+
+				gmPtpConfig := (*ptpv1.PtpConfig)(fullConfig.DiscoveredGrandMasterPtpConfig)
+				Expect(gmPtpConfig).ToNot(BeNil(), "GM PtpConfig was not discovered")
+
+				gmPod, err := ptphelper.GetPTPPodWithPTPConfig(gmPtpConfig)
+				Expect(err).ToNot(HaveOccurred())
+
+				By("checking GM clock class is Locked (CC6)")
+				Eventually(func() bool {
+					buf, _, _ := pods.ExecCommand(client.Client, true, gmPod, pkg.PtpContainerName, []string{"curl", pkg.MetricsEndPoint})
+					return checkClockClassInMetrics(buf.String(), "6")
+				}, pkg.TimeoutIn5Minutes, 5*time.Second).Should(BeTrue(),
+					"Expected GM clock class to reach 6 (LOCKED)")
+
+				bcPtpConfig := (*ptpv1.PtpConfig)(fullConfig.DiscoveredClockUnderTestPtpConfig)
+				Expect(bcPtpConfig).ToNot(BeNil(), "BC PtpConfig was not discovered")
+
+				bcPod, err := ptphelper.GetPTPPodWithPTPConfig(bcPtpConfig)
+				Expect(err).ToNot(HaveOccurred())
+
+				By("checking BC clock class reaches Locked (CC6)")
+				Eventually(func() bool {
+					buf, _, _ := pods.ExecCommand(client.Client, true, bcPod, pkg.PtpContainerName, []string{"curl", pkg.MetricsEndPoint})
+					return checkClockClassInMetrics(buf.String(), "6")
+				}, pkg.TimeoutIn5Minutes, 5*time.Second).Should(BeTrue(),
+					"Expected BC clock class to reach 6 (LOCKED) via T-GM upstream")
+
+				By("checking BC slave port role is SLAVE")
+				slaveIf := ptpv1.GetInterfaces(*bcPtpConfig, ptpv1.Slave)
+				Expect(slaveIf).ToNot(BeEmpty(), "no slave interfaces found in BC PtpConfig")
+
+				slaveRoles := make([]metrics.MetricRole, len(slaveIf))
+				for i := range slaveRoles {
+					slaveRoles[i] = metrics.MetricRoleSlave
+				}
+				bcNodeName := bcPod.Spec.NodeName
+				Eventually(func() error {
+					return metrics.CheckClockRole(slaveRoles, slaveIf, &bcNodeName)
+				}, 5*time.Minute, 10*time.Second).Should(BeNil(),
+					"BC slave port should be in SLAVE role")
+			})
+
+			It("Verifies cascading holdover on GNSS signal loss", func() {
+				gmPtpConfig := (*ptpv1.PtpConfig)(fullConfig.DiscoveredGrandMasterPtpConfig)
+				Expect(gmPtpConfig).ToNot(BeNil(), "GM PtpConfig was not discovered")
+				gmPod, err := ptphelper.GetPTPPodWithPTPConfig(gmPtpConfig)
+				Expect(err).ToNot(HaveOccurred())
+
+				bcPtpConfig := (*ptpv1.PtpConfig)(fullConfig.DiscoveredClockUnderTestPtpConfig)
+				Expect(bcPtpConfig).ToNot(BeNil(), "BC PtpConfig was not discovered")
+				bcPod, err := ptphelper.GetPTPPodWithPTPConfig(bcPtpConfig)
+				Expect(err).ToNot(HaveOccurred())
+
+				By("ensuring initial GM clock class is 6 (LOCKED)")
+				Eventually(func() bool {
+					buf, _, _ := pods.ExecCommand(client.Client, true, gmPod, pkg.PtpContainerName, []string{"curl", pkg.MetricsEndPoint})
+					return checkClockClassInMetrics(buf.String(), "6")
+				}, pkg.TimeoutIn5Minutes, 5*time.Second).Should(BeTrue())
+
+				By("ensuring initial BC clock class is 6 (LOCKED)")
+				Eventually(func() bool {
+					buf, _, _ := pods.ExecCommand(client.Client, true, bcPod, pkg.PtpContainerName, []string{"curl", pkg.MetricsEndPoint})
+					return checkClockClassInMetrics(buf.String(), "6")
+				}, pkg.TimeoutIn5Minutes, 5*time.Second).Should(BeTrue())
+
+				By("triggering GNSS signal loss via gnss-sim API")
+				simErr := ptphelper.GNSSSimSignalLoss()
+				Expect(simErr).ToNot(HaveOccurred())
+				defer func() { _ = ptphelper.GNSSSimSignalRestore() }()
+
+				By("waiting for GM clock class to degrade from Locked (6)")
+				Eventually(func() bool {
+					buf, _, _ := pods.ExecCommand(client.Client, true, gmPod, pkg.PtpContainerName, []string{"curl", pkg.MetricsEndPoint})
+					return !checkClockClassInMetrics(buf.String(), "6")
+				}, 5*time.Minute, 10*time.Second).Should(BeTrue(),
+					"Expected GM clock class to degrade after GNSS loss")
+
+				By("waiting for BC clock class to degrade from Locked (6)")
+				Eventually(func() bool {
+					buf, _, _ := pods.ExecCommand(client.Client, true, bcPod, pkg.PtpContainerName, []string{"curl", pkg.MetricsEndPoint})
+					return !checkClockClassInMetrics(buf.String(), "6")
+				}, 5*time.Minute, 10*time.Second).Should(BeTrue(),
+					"Expected BC clock class to cascade-degrade after upstream GM GNSS loss")
+
+				By("restoring GNSS signal via gnss-sim API")
+				simErr = ptphelper.GNSSSimSignalRestore()
+				Expect(simErr).ToNot(HaveOccurred())
+
+				By("waiting for GM clock class to recover to Locked (6)")
+				Eventually(func() bool {
+					buf, _, _ := pods.ExecCommand(client.Client, true, gmPod, pkg.PtpContainerName, []string{"curl", pkg.MetricsEndPoint})
+					return checkClockClassInMetrics(buf.String(), "6")
+				}, pkg.TimeoutIn5Minutes, 5*time.Second).Should(BeTrue(),
+					"Expected GM clock class to recover to 6")
+
+				By("waiting for BC clock class to recover to Locked (6)")
+				Eventually(func() bool {
+					buf, _, _ := pods.ExecCommand(client.Client, true, bcPod, pkg.PtpContainerName, []string{"curl", pkg.MetricsEndPoint})
+					return checkClockClassInMetrics(buf.String(), "6")
+				}, pkg.TimeoutIn5Minutes, 5*time.Second).Should(BeTrue(),
+					"Expected BC clock class to cascade-recover to 6")
+
+				logrus.Info("Successfully verified T-GM -> BC cascading holdover and recovery")
+			})
+		})
+
 		It("Should properly cleanup volumeMounts when secrets are deleted and remount when recreated", func() {
 			ptpOperatorVersion, err := ptphelper.GetPtpOperatorVersion()
 			Expect(err).ToNot(HaveOccurred())
@@ -3611,6 +3804,24 @@ func waitForClockClass(fullConfig testconfig.TestConfig, expectedState string) {
 func checkClockClassStateReturnBool(fullConfig testconfig.TestConfig, expectedState string) bool {
 	buf, _, _ := pods.ExecCommand(client.Client, true, fullConfig.DiscoveredClockUnderTestPod, pkg.PtpContainerName, []string{"curl", pkg.MetricsEndPoint})
 	scanner := bufio.NewScanner(strings.NewReader(buf.String()))
+	for scanner.Scan() {
+		line := scanner.Text()
+		if matches := clockClassRe.FindStringSubmatch(line); matches != nil {
+			process := matches[2]
+			class := matches[3]
+			if strings.TrimSpace(process) == "ptp4l" && strings.TrimSpace(class) == expectedState {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// checkClockClassInMetrics scans raw metrics output for ptp4l clock class matching expectedState.
+// Unlike checkClockClassStateReturnBool, this operates on pre-fetched metrics text so the caller
+// can target any pod (GM, BC, OC) independently.
+func checkClockClassInMetrics(metricsOutput string, expectedState string) bool {
+	scanner := bufio.NewScanner(strings.NewReader(metricsOutput))
 	for scanner.Scan() {
 		line := scanner.Text()
 		if matches := clockClassRe.FindStringSubmatch(line); matches != nil {

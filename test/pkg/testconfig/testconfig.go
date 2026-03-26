@@ -60,6 +60,10 @@ const (
 	DualNICBoundaryClockHAString = "DualNICBCHA"
 	// TelcoGrandMasterClockString matches the T-GM clock mode in Environement
 	TelcoGrandMasterClockString = "TGM"
+	// TelcoGMOCString matches the T-GM + OC clock mode
+	TelcoGMOCString = "TGMOC"
+	// TelcoGMBCString matches the T-GM + BC clock mode
+	TelcoGMBCString = "TGMBC"
 	ptp4lEthernet               = "-2 --summary_interval -4"
 	ptp4lEthernetSlave          = "-2 -s --summary_interval -4"
 	phc2sysGM                   = "-a -r -r -n 24" // use phc2sys to sync phc to system clock
@@ -104,6 +108,10 @@ const (
 	None
 	//Dual Follower mode
 	DualFollowerClock
+	// TelcoGMOC: T-GM as grandmaster with downstream OC
+	TelcoGMOC
+	// TelcoGMBC: T-GM as grandmaster with downstream BC (and optional downstream OC)
+	TelcoGMBC
 )
 
 type TestConfig struct {
@@ -137,6 +145,9 @@ var enabledProblems = []string{AlgoOCString,
 	AlgoDualNicBCString,
 	AlgoDualNicBCWithSlavesString,
 	AlgoTelcoGMString,
+	AlgoTGMOCString,
+	AlgoTGMBCString,
+	AlgoTGMBCWithSlavesString,
 	AlgoOCExtGMString,
 	AlgoBCExtGMString,
 	AlgoBCWithSlavesExtGMString,
@@ -178,6 +189,9 @@ const (
 	AlgoDualNicBCExtGMString           = "DualNicBCExtGM"
 	AlgoBCWithSlavesExtGMString        = "BCWithSlavesExtGM"
 	AlgoDualNicBCWithSlavesExtGMString = "DualNicBCWithSlavesExtGM"
+	AlgoTGMOCString                    = "TGMOC"
+	AlgoTGMBCString                    = "TGMBC"
+	AlgoTGMBCWithSlavesString          = "TGMBCWithSlaves"
 )
 
 type ptpDiscoveryRes ptpv1.PtpConfig
@@ -385,6 +399,10 @@ func (mode PTPMode) String() string {
 		return DualNICBoundaryClockHAString
 	case TelcoGrandMasterClock:
 		return TelcoGrandMasterClockString
+	case TelcoGMOC:
+		return TelcoGMOCString
+	case TelcoGMBC:
+		return TelcoGMBCString
 	case Discovery:
 		return DiscoveryString
 	case None:
@@ -408,6 +426,10 @@ func StringToMode(aString string) PTPMode {
 		return DualNICBoundaryClockHA
 	case strings.ToLower(TelcoGrandMasterClockString):
 		return TelcoGrandMasterClock
+	case strings.ToLower(TelcoGMOCString):
+		return TelcoGMOC
+	case strings.ToLower(TelcoGMBCString):
+		return TelcoGMBC
 	case strings.ToLower(DiscoveryString), strings.ToLower(legacyDiscoveryString):
 		return Discovery
 	case strings.ToLower(NoneString):
@@ -454,13 +476,13 @@ func GetDesiredConfig(forceUpdate bool) TestConfig {
 	}
 
 	switch mode {
-	case OrdinaryClock, BoundaryClock, DualNICBoundaryClock, DualNICBoundaryClockHA, TelcoGrandMasterClock, DualFollowerClock, Discovery:
+	case OrdinaryClock, BoundaryClock, DualNICBoundaryClock, DualNICBoundaryClockHA, TelcoGrandMasterClock, TelcoGMOC, TelcoGMBC, DualFollowerClock, Discovery:
 		logrus.Infof("%s mode detected", mode)
 		GlobalConfig.PtpModeDesired = mode
 		GlobalConfig.Status = InitStatus
 		return GlobalConfig
 	case None:
-		logrus.Infof("No test mode specified using, %s mode. Specify the env variable PTP_TEST_MODE with one of %s, %s, %s, %s, %s, %s, %s", OrdinaryClock, Discovery, OrdinaryClock, BoundaryClock, DualFollowerClockString, TelcoGrandMasterClock, DualNICBoundaryClockString, DualNICBoundaryClockHAString)
+		logrus.Infof("No test mode specified using, %s mode. Specify the env variable PTP_TEST_MODE with one of %s, %s, %s, %s, %s, %s, %s, %s, %s", OrdinaryClock, Discovery, OrdinaryClock, BoundaryClock, DualFollowerClockString, TelcoGrandMasterClock, TelcoGMOCString, TelcoGMBCString, DualNICBoundaryClockString, DualNICBoundaryClockHAString)
 		GlobalConfig.PtpModeDesired = OrdinaryClock
 		GlobalConfig.Status = InitStatus
 		return GlobalConfig
@@ -503,11 +525,9 @@ func CreatePtpConfigurations() error {
 	logrus.Tracef("L2DiscoveryConfig: %s\n", config)
 	logrus.Tracef("L2 ifListFiltered=%+v, ifListUnfiltered=%+v", config.GetPtpIfList(), config.GetPtpIfListUnfiltered())
 	GlobalConfig.L2Config = config
-	if GlobalConfig.PtpModeDesired == TelcoGrandMasterClock {
-		ptphelper.NormalizeL2IntegratedGnssNICsForTelcoGM()
-		if !ptphelper.L2ConfigReportsIntelWPC(config) {
-			ptphelper.ApplyIntegratedGnssSimWPCPCIOverlay()
-		}
+	ptphelper.NormalizeL2IntegratedGnssNICsForTelcoGM()
+	if ptphelper.IsGnssSimConfigured() && !ptphelper.L2ConfigReportsIntelWPC(config) {
+		ptphelper.ApplyIntegratedGnssSimWPCPCIOverlay()
 	}
 
 	if GlobalConfig.PtpModeDesired != Discovery {
@@ -536,6 +556,10 @@ func CreatePtpConfigurations() error {
 		case TelcoGrandMasterClock:
 			isExternalMaster = false // WPC GM is the only GM under test
 			return PtpConfigTelcoGM(isExternalMaster)
+		case TelcoGMOC:
+			return PtpConfigTGMOC()
+		case TelcoGMBC:
+			return PtpConfigTGMBC()
 		}
 	}
 	return nil
@@ -590,6 +614,29 @@ func initAndSolveProblems() {
 	}
 	data.problems[AlgoTelcoGMString] = &[][][]int{
 		{{int(solver.StepIsWPCNic), 1, 0}}, // step1
+	}
+
+	// TGM + OC: WPC GM on slot 0, downstream OC slave on slot 1
+	data.problems[AlgoTGMOCString] = &[][][]int{
+		{{int(solver.StepIsWPCNic), 1, 0}},        // step1: GM must be WPC
+		{{int(solver.StepSameLan2), 2, 0, 1}},      // step2: OC slave on same LAN as GM
+	}
+
+	// TGM + BC: WPC GM on slot 0, BC slave on slot 1, BC master on slot 2
+	data.problems[AlgoTGMBCString] = &[][][]int{
+		{{int(solver.StepIsWPCNic), 1, 0}},        // step1: GM must be WPC
+		{{int(solver.StepSameLan2), 2, 0, 1}},      // step2: BC slave on same LAN as GM
+		{{int(solver.StepSameNic), 2, 1, 2}},       // step3: BC slave + master on same NIC
+	}
+
+	// TGM + BC + downstream OC: WPC GM slot 0, BC slave slot 1, BC master slot 2, downstream OC slot 3
+	data.problems[AlgoTGMBCWithSlavesString] = &[][][]int{
+		{{int(solver.StepIsWPCNic), 1, 0}},        // step1: GM must be WPC
+		{{int(solver.StepSameLan2), 2, 0, 1}},      // step2: BC slave on same LAN as GM
+		{{int(solver.StepSameNic), 2, 1, 2}},       // step3: BC slave + master on same NIC
+		{{int(solver.StepSameLan2), 2, 2, 3},       // step4: downstream OC on BC master LAN
+			{int(solver.StepSameNic), 2, 0, 3, solver.Negative},    // GM and downstream OC on different NICs
+			{int(solver.StepSameLan2), 2, 0, 3, solver.Negative}},  // GM and downstream OC on different LANs
 	}
 
 	data.problems[AlgoDualNicBCWithSlavesString] = &[][][]int{
@@ -697,6 +744,21 @@ func initAndSolveProblems() {
 
 	// GM
 	(*data.testClockRolesAlgoMapping[AlgoTelcoGMString])[Grandmaster] = 0
+
+	// TGM + OC
+	(*data.testClockRolesAlgoMapping[AlgoTGMOCString])[Grandmaster] = 0
+	(*data.testClockRolesAlgoMapping[AlgoTGMOCString])[Slave1] = 1
+
+	// TGM + BC
+	(*data.testClockRolesAlgoMapping[AlgoTGMBCString])[Grandmaster] = 0
+	(*data.testClockRolesAlgoMapping[AlgoTGMBCString])[BC1Slave] = 1
+	(*data.testClockRolesAlgoMapping[AlgoTGMBCString])[BC1Master] = 2
+
+	// TGM + BC with downstream OC
+	(*data.testClockRolesAlgoMapping[AlgoTGMBCWithSlavesString])[Grandmaster] = 0
+	(*data.testClockRolesAlgoMapping[AlgoTGMBCWithSlavesString])[BC1Slave] = 1
+	(*data.testClockRolesAlgoMapping[AlgoTGMBCWithSlavesString])[BC1Master] = 2
+	(*data.testClockRolesAlgoMapping[AlgoTGMBCWithSlavesString])[Slave1] = 3
 
 	// OC, External GM
 	(*data.testClockRolesAlgoMapping[AlgoOCExtGMString])[Slave1] = 0
@@ -1580,6 +1642,95 @@ func PtpConfigTelcoGM(isExtGM bool) error {
 		}
 	}
 	return nil
+}
+
+// PtpConfigTGMOC configures a WPC T-GM as grandmaster with a downstream OC slave.
+func PtpConfigTGMOC() error {
+	BestSolution := ""
+	if len(*data.solutions[AlgoTGMOCString]) != 0 {
+		BestSolution = AlgoTGMOCString
+	}
+	if BestSolution == "" {
+		return fmt.Errorf("no solution found for TGMOC configuration")
+	}
+
+	grandmaster := (*data.testClockRolesAlgoMapping[BestSolution])[Grandmaster]
+	slave1 := (*data.testClockRolesAlgoMapping[BestSolution])[Slave1]
+
+	gmIf := GlobalConfig.L2Config.GetPtpIfList()[(*data.solutions[BestSolution])[FirstSolution][grandmaster]]
+	slave1If := GlobalConfig.L2Config.GetPtpIfList()[(*data.solutions[BestSolution])[FirstSolution][slave1]]
+
+	IfList, deviceID := ptphelper.GetListOfWPCEnabledInterfaces(gmIf.NodeName)
+	if len(IfList) == 0 {
+		return fmt.Errorf("WPC NIC not found on node %s for TGMOC", gmIf.NodeName)
+	}
+
+	err := CreatePtpConfigWPCGrandMaster(pkg.PtpWPCGrandMasterPolicyName, gmIf.NodeName, IfList, deviceID)
+	if err != nil {
+		logrus.Errorf("Error creating WPC Grandmaster ptpconfig: %s", err)
+		return err
+	}
+
+	err = CreatePtpConfigOC(pkg.PtpSlave1PolicyName, slave1If.NodeName,
+		slave1If.IfName, true, pkg.PtpClockUnderTestNodeLabel)
+	if err != nil {
+		logrus.Errorf("Error creating Slave1 ptpconfig: %s", err)
+	}
+	return err
+}
+
+// PtpConfigTGMBC configures a WPC T-GM as grandmaster with a downstream BC,
+// and optionally a downstream OC behind the BC.
+func PtpConfigTGMBC() error {
+	BestSolution := ""
+	if len(*data.solutions[AlgoTGMBCString]) != 0 {
+		BestSolution = AlgoTGMBCString
+	}
+	if len(*data.solutions[AlgoTGMBCWithSlavesString]) != 0 {
+		BestSolution = AlgoTGMBCWithSlavesString
+	}
+	if BestSolution == "" {
+		return fmt.Errorf("no solution found for TGMBC configuration")
+	}
+
+	logrus.Infof("Configuring best solution= %s", BestSolution)
+
+	grandmaster := (*data.testClockRolesAlgoMapping[BestSolution])[Grandmaster]
+	gmIf := GlobalConfig.L2Config.GetPtpIfList()[(*data.solutions[BestSolution])[FirstSolution][grandmaster]]
+
+	IfList, deviceID := ptphelper.GetListOfWPCEnabledInterfaces(gmIf.NodeName)
+	if len(IfList) == 0 {
+		return fmt.Errorf("WPC NIC not found on node %s for TGMBC", gmIf.NodeName)
+	}
+
+	err := CreatePtpConfigWPCGrandMaster(pkg.PtpWPCGrandMasterPolicyName, gmIf.NodeName, IfList, deviceID)
+	if err != nil {
+		logrus.Errorf("Error creating WPC Grandmaster ptpconfig: %s", err)
+		return err
+	}
+
+	bc1Slave := (*data.testClockRolesAlgoMapping[BestSolution])[BC1Slave]
+	bc1Master := (*data.testClockRolesAlgoMapping[BestSolution])[BC1Master]
+	bc1SlaveIf := GlobalConfig.L2Config.GetPtpIfList()[(*data.solutions[BestSolution])[FirstSolution][bc1Slave]]
+	bc1MasterIf := GlobalConfig.L2Config.GetPtpIfList()[(*data.solutions[BestSolution])[FirstSolution][bc1Master]]
+
+	err = CreatePtpConfigBC(pkg.PtpBcMaster1PolicyName, bc1MasterIf.NodeName,
+		bc1MasterIf.IfName, bc1SlaveIf.IfName, true)
+	if err != nil {
+		logrus.Errorf("Error creating BC ptpconfig: %s", err)
+		return err
+	}
+
+	if BestSolution == AlgoTGMBCWithSlavesString {
+		slave1 := (*data.testClockRolesAlgoMapping[BestSolution])[Slave1]
+		slave1If := GlobalConfig.L2Config.GetPtpIfList()[(*data.solutions[BestSolution])[FirstSolution][slave1]]
+		err = CreatePtpConfigOC(pkg.PtpSlave1PolicyName, slave1If.NodeName,
+			slave1If.IfName, false, pkg.PtpSlave1NodeLabel)
+		if err != nil {
+			logrus.Errorf("Error creating downstream Slave1 ptpconfig: %s", err)
+		}
+	}
+	return err
 }
 
 // helper function to add an interface to the ptp4l config
