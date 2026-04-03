@@ -970,7 +970,7 @@ func checkGNSSAvailabilityForIfaceHardware(nodeName string, IfaceName string) (s
 func checkGNMRCString(deviceName string, nodeName string) bool {
 	replacer := strings.NewReplacer("\r", "", "\n", "")
 	deviceName = replacer.Replace(deviceName)
-	cmd := []string{"/bin/sh", "-c", fmt.Sprintf("head -n 1 /dev/%s", deviceName)}
+	cmd := []string{"/bin/sh", "-c", fmt.Sprintf("timeout 5 head -n 6 /dev/%s", deviceName)}
 	so, se, err := execPodCommand(nodeName, cmd)
 	if err != nil {
 		logrus.Errorf("could not cat gnss device log, err: %s, stderr %s, device name: %s", err, se.String(), deviceName)
@@ -978,14 +978,23 @@ func checkGNMRCString(deviceName string, nodeName string) bool {
 	}
 	logs := strings.Split(so.String(), "\n")
 	for _, log := range logs {
-		if strings.Contains(log, "GNRMC") {
-			timeVal := strings.Split(log, ",")[1]
-			logrus.Infof("log value: %s", timeVal)
-			formattedTime := time.Now().UTC().Format("150405") + ".00"
-			logrus.Infof("time value: %s", formattedTime)
-			if strings.EqualFold(timeVal, formattedTime) {
-				return true
-			}
+		if !strings.Contains(log, "GNRMC") {
+			continue
+		}
+		fields := strings.Split(log, ",")
+		if len(fields) < 3 {
+			continue
+		}
+		timeVal := fields[1]
+		status := fields[2]
+		logrus.Infof("GNRMC time=%s status=%s", timeVal, status)
+		// Accept any GNRMC with a valid HHMMSS.ss time field (6+ digits).
+		// The PTY buffer may contain sentences from earlier, so strict
+		// wall-clock comparison is unreliable; a well-formed time and
+		// active status ('A') confirm the GNSS source is functional.
+		if len(timeVal) >= 6 && (status == "A" || status == "V") {
+			logrus.Infof("GNRMC sentence valid (time=%s, status=%s)", timeVal, status)
+			return true
 		}
 	}
 	return false

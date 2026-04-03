@@ -5,12 +5,8 @@ WORKDIR /build
 COPY ptp-tools/gnss-sim/ .
 RUN CGO_ENABLED=0 GOOS=linux go build -o gnss-sim .
 
-# Runtime stage: minimal image with socat for PTY pair creation
+# Runtime stage: gnss-sim creates PTY pairs directly (no socat needed)
 FROM quay.io/centos/centos:stream9
-
-RUN dnf install -y socat && \
-    dnf clean all && \
-    rm -rf /var/cache/dnf
 
 COPY --from=builder /build/gnss-sim /usr/local/bin/gnss-sim
 COPY ptp-tools/gnss-sim/entrypoint.sh /usr/local/bin/entrypoint.sh

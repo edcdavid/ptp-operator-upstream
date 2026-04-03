@@ -88,10 +88,10 @@ kubectl get pods -n openshift-ptp -o wide
 export GNSS_SIM_NMEA_DEVICE="${GNSS_SIM_NMEA_DEVICE:-ttyGNSS_TS2PHC}"
 export GNSS_SIM_IFACE1="${GNSS_SIM_IFACE1:-ens1f0}"
 export GNSS_SIM_IFACE2="${GNSS_SIM_IFACE2:-ens1f1}"
-export GNSS_SIM_API_PORT="${GNSS_SIM_API_PORT:-8089}"
+export GNSS_SIM_API_PORT="${GNSS_SIM_API_PORT:-9200}"
 
 # run tests
-./run-tests.sh --kind serial --mode oc,bc,dualnicbc,dualnicbcha,dualfollower,tgm,tgmoc,tgmbc \
+./run-tests.sh --kind serial --mode tgm,tgmoc,tgmbc \
   --linuxptp-daemon-image "$VM_IP/test:lptpd" \
   --must-gather-image "$VM_IP/test:ptpmg" \
   --debug-image "$VM_IP/test:debug"

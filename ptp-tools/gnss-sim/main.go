@@ -29,18 +29,19 @@ import (
 func main() {
 	var (
 		outputs         string
+		ptyLinks        string
 		apiPort         string
 		holdoverTimeout int
 	)
-	flag.StringVar(&outputs, "outputs", "", "Comma-separated output paths for NMEA data (default: stdout)")
+	flag.StringVar(&outputs, "outputs", "", "Comma-separated output file paths for NMEA data (default: stdout)")
+	flag.StringVar(&ptyLinks, "pty-links", "", "Comma-separated symlink paths; creates a PTY pair per path and writes to the master")
 	flag.StringVar(&apiPort, "api-port", "9200", "HTTP API listen port")
 	flag.IntVar(&holdoverTimeout, "holdover-timeout", 5, "DPLL holdover timeout in seconds before transitioning to FREERUN")
 	flag.Parse()
 
 	state := DefaultState()
 
-	// Open output writers
-	writers, closers := openWriters(outputs)
+	writers, closers := openAllWriters(outputs, ptyLinks)
 	defer func() {
 		for _, c := range closers {
 			c.Close()
@@ -83,24 +84,18 @@ func main() {
 	dpllSim.Stop()
 }
 
-// openWriters parses the comma-separated output paths and opens each
-// as a file for writing. If the path list is empty, os.Stdout is used.
-// Returns the writers and a slice of closers for deferred cleanup.
-func openWriters(paths string) ([]io.Writer, []*os.File) {
-	if paths == "" {
-		return []io.Writer{os.Stdout}, nil
-	}
+type closer interface {
+	Close() error
+}
 
-	parts := strings.Split(paths, ",")
-	writers := make([]io.Writer, 0, len(parts))
-	closers := make([]*os.File, 0, len(parts))
+// openAllWriters creates writers from --outputs (plain files) and
+// --pty-links (self-managed PTY pairs). Falls back to stdout.
+func openAllWriters(outputs, ptyLinks string) ([]io.Writer, []closer) {
+	var writers []io.Writer
+	var closers []closer
 
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
-		}
-		f, err := os.OpenFile(p, os.O_WRONLY, 0)
+	for _, p := range splitPaths(outputs) {
+		f, err := os.OpenFile(p, os.O_WRONLY|syscall.O_NONBLOCK, 0)
 		if err != nil {
 			log.Fatalf("failed to open output %q: %v", p, err)
 		}
@@ -109,8 +104,31 @@ func openWriters(paths string) ([]io.Writer, []*os.File) {
 		log.Printf("opened output: %s", p)
 	}
 
+	for _, p := range splitPaths(ptyLinks) {
+		pw, err := openPTYLink(p)
+		if err != nil {
+			log.Fatalf("failed to create PTY %q: %v", p, err)
+		}
+		writers = append(writers, pw)
+		closers = append(closers, pw)
+	}
+
 	if len(writers) == 0 {
 		return []io.Writer{os.Stdout}, nil
 	}
 	return writers, closers
+}
+
+func splitPaths(s string) []string {
+	if s == "" {
+		return nil
+	}
+	var result []string
+	for _, p := range strings.Split(s, ",") {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			result = append(result, p)
+		}
+	}
+	return result
 }
