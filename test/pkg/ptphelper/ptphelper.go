@@ -882,7 +882,8 @@ func GetListOfWPCEnabledInterfaces(nodeName string) ([]string, string) {
 	for _, iFace := range l2WPC {
 		if strings.HasSuffix(iFace, "0") {
 			if deviceID, ok := checkGNSSAvailabilityForIfaceHardware(nodeName, iFace); ok {
-				logrus.Infof("Telco GM: using hardware GNSS via L2 WPC (interface %s, device %s)", iFace, deviceID)
+				gnssSimNmeaActive.Store(true)
+				logrus.Infof("Telco GM: using kernel GNSS via L2 WPC (interface %s, device %s) — simulation mode", iFace, deviceID)
 				return addAllInterfacesForNic(l2WPC, iFace), deviceID
 			}
 			break

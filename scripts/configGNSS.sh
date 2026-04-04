@@ -2,9 +2,16 @@
 #
 # configGNSS.sh — Sets up the GNSS simulator in the CI environment.
 #
-# Creates the gnss-sim container (socat PTY pairs + NMEA generator)
-# and makes the virtual serial ports accessible to the Kind cluster
-# workers via shared /dev mounts.
+# When a kernel GNSS device exists (/dev/gnss0, created by netdevsim's
+# DPLL+GNSS emulation), gnss-sim writes NMEA directly into the kernel
+# device. Readers (ts2phc, gpsd) open /dev/gnss0 and receive the stream
+# from the kernel's read FIFO — no PTY needed for the primary NMEA
+# consumer.
+#
+# A second PTY is still created for /dev/ttyGNSS_GNSS0 so a secondary
+# consumer (e.g. gpsd) can read independently.
+#
+# Falls back to pure PTY mode when no kernel GNSS device is present.
 #
 # Usage: ./configGNSS.sh <registry-ip>
 #
@@ -14,25 +21,46 @@ set -euo pipefail
 VM_IP=$1
 
 GNSS_SIM_API_PORT="${GNSS_SIM_API_PORT:-9200}"
+GNSS_KERNEL_DEV="${GNSS_KERNEL_DEV:-/dev/gnss0}"
 
-echo "=== Starting GNSS simulator container ==="
+echo "=== Setting up GNSS simulator ==="
 
+# Kill any previous gnss-sim process
+pkill -f 'gnss-sim.*--api-port' || true
 podman rm -f gnss-sim 2>/dev/null || true
+rm -f /dev/ttyGNSS_TS2PHC /dev/ttyGNSS_GNSS0
 
-# The gnss-sim container creates socat PTY pairs and writes NMEA at 1 Hz.
-# /dev is volume-mounted so the PTY symlinks appear on the host (and in
-# Kind nodes via their own /dev mount in kind-config.yaml).
-podman run -d \
-    --privileged \
-    --volume /dev:/dev \
-    --replace \
-    --pull always \
-    --name gnss-sim \
-    -p "${GNSS_SIM_API_PORT}:${GNSS_SIM_API_PORT}" \
-    -e "GNSS_SIM_API_PORT=${GNSS_SIM_API_PORT}" \
-    -e "GNSS_PTY_TS2PHC=/dev/ttyGNSS_TS2PHC" \
-    -e "GNSS_PTY_GNSS0=/dev/ttyGNSS_GNSS0" \
-    "${VM_IP}/test:gnss-sim"
+# Extract the gnss-sim binary from the container image.
+# Running it natively on the host avoids devpts namespace isolation:
+# containers get their own devpts, so PTY pairs created inside a
+# container are invisible to Kind workers that share the host devpts.
+GNSS_SIM_BIN="/usr/local/bin/gnss-sim"
+TEMP_CONTAINER="gnss-sim-extract"
+podman rm -f "$TEMP_CONTAINER" 2>/dev/null || true
+podman create --name "$TEMP_CONTAINER" "${VM_IP}/test:gnss-sim"
+podman cp "$TEMP_CONTAINER":/usr/local/bin/gnss-sim "$GNSS_SIM_BIN"
+podman rm "$TEMP_CONTAINER"
+chmod +x "$GNSS_SIM_BIN"
+
+echo "=== Starting GNSS simulator on host ==="
+
+if [ -c "$GNSS_KERNEL_DEV" ]; then
+    echo "Kernel GNSS device found at $GNSS_KERNEL_DEV — using hybrid mode"
+    "$GNSS_SIM_BIN" \
+        --gnss-dev "$GNSS_KERNEL_DEV" \
+        --pty-links /dev/ttyGNSS_GNSS0 \
+        --api-port "${GNSS_SIM_API_PORT}" &
+    GNSS_PID=$!
+    NMEA_SOURCE="$GNSS_KERNEL_DEV"
+else
+    echo "No kernel GNSS device found — using PTY-only mode"
+    "$GNSS_SIM_BIN" \
+        --pty-links /dev/ttyGNSS_TS2PHC,/dev/ttyGNSS_GNSS0 \
+        --api-port "${GNSS_SIM_API_PORT}" &
+    GNSS_PID=$!
+    NMEA_SOURCE="/dev/ttyGNSS_TS2PHC"
+fi
+echo "gnss-sim PID: $GNSS_PID"
 
 # Wait for the GNSS simulator to be ready
 echo "Waiting for GNSS simulator to become healthy..."
@@ -48,30 +76,37 @@ done
 
 if [ $retries -ge 30 ]; then
     echo "ERROR: GNSS simulator did not become healthy after 30 seconds"
-    podman logs gnss-sim
     exit 1
 fi
 
-# Verify PTY symlinks exist
-for pty in /dev/ttyGNSS_TS2PHC /dev/ttyGNSS_GNSS0; do
-    if [ ! -e "$pty" ]; then
-        echo "ERROR: PTY symlink $pty not found on host"
-        podman logs gnss-sim
+# Verify GNSS outputs
+if [ -c "$GNSS_KERNEL_DEV" ]; then
+    echo "Kernel GNSS device $GNSS_KERNEL_DEV present"
+else
+    if [ ! -e /dev/ttyGNSS_TS2PHC ]; then
+        echo "ERROR: PTY symlink /dev/ttyGNSS_TS2PHC not found on host"
         exit 1
     fi
-    echo "PTY symlink $pty exists"
-done
+    echo "PTY symlink /dev/ttyGNSS_TS2PHC exists"
+fi
 
-# Verify NMEA output
-echo "Verifying NMEA output on /dev/ttyGNSS_GNSS0..."
-NMEA_LINE=$(timeout 3 head -n 1 /dev/ttyGNSS_GNSS0 2>/dev/null || true)
-if echo "$NMEA_LINE" | grep -q "GNRMC\|GNGGA\|GPZDA"; then
-    echo "GNSS simulator producing valid NMEA: $NMEA_LINE"
-else
-    echo "WARNING: Could not read NMEA from /dev/ttyGNSS_GNSS0 (may need a moment to start)"
+if [ -e /dev/ttyGNSS_GNSS0 ]; then
+    echo "PTY symlink /dev/ttyGNSS_GNSS0 exists"
+fi
+
+# Verify NMEA output on the secondary PTY
+if [ -e /dev/ttyGNSS_GNSS0 ]; then
+    echo "Verifying NMEA output on /dev/ttyGNSS_GNSS0..."
+    NMEA_LINE=$(timeout 3 head -n 1 /dev/ttyGNSS_GNSS0 2>/dev/null || true)
+    if echo "$NMEA_LINE" | grep -q "GNRMC\|GNGGA\|GPZDA"; then
+        echo "GNSS simulator producing valid NMEA: $NMEA_LINE"
+    else
+        echo "WARNING: Could not read NMEA from /dev/ttyGNSS_GNSS0 (may need a moment to start)"
+    fi
 fi
 
 echo "=== GNSS simulator setup complete ==="
-echo "  API:          http://localhost:${GNSS_SIM_API_PORT}"
-echo "  ts2phc PTY:   /dev/ttyGNSS_TS2PHC"
-echo "  GNSS device:  /dev/ttyGNSS_GNSS0"
+echo "  PID:           $GNSS_PID"
+echo "  API:           http://localhost:${GNSS_SIM_API_PORT}"
+echo "  NMEA source:   $NMEA_SOURCE"
+echo "  GNSS device:   /dev/ttyGNSS_GNSS0"

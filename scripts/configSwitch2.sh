@@ -23,16 +23,12 @@ podman run -d --privileged --volume /dev:/dev --replace --pull always --name swi
 podman exec switch1 yum install iputils iproute ptp4l ethtool ps -y
 
 # Configure netdevsim interface pairs connected with veth (ptp1 <----> ptp1)
-# ./configpair.sh < port1 netdevsim ID (unique)> <port 2 netdevsim ID (unique)> <name of the interface on both side of the link (ptp1)>
-# <port1 ptp clock ID A (/dev/ptpA)> < port2 ptp clock ID B (/dev/ptpB)> <port1 container name > <port2 container name> <port1 pci ID> <port2 pci ID>
+# ./configpair.sh <id1> <id2> <ifname> <clk1> <clk2> <container1> <container2> <pci1> <pci2> [wpc]
+#   wpc=1 enables DPLL + GNSS emulation on the worker-side NIC (WPC NIC).
 
-# TODO: netdevsim needs to implement real PCI address, right now we are reusing the address of existing devices.
-# For Telco GM / integrated GNSS discovery via L2, prefer PCI functions whose lspci Description/Subsystem
-# contain GNRD (Intel integrated GNSS) or E810 WPC identity so tests can treat the link like real WPC hardware
-# without relying only on the netdevsim overlay (see ptphelper.NormalizeL2IntegratedGnssNICsForTelcoGM).
-# Server 1 nic 1
-./configpair.sh 1 2 ens1f0 1 0 kind-netdevsim-worker switch1 ${PCI_PREFIX}:01.0 ${PCI_PREFIX}:07.0
-./configpair.sh 3 4 ens1f1 1 0 kind-netdevsim-worker switch1 ${PCI_PREFIX}:01.1 ${PCI_PREFIX}:08.0
+# Server 1 nic 1 (WPC — grandmaster with DPLL + GNSS)
+./configpair.sh 1 2 ens1f0 1 0 kind-netdevsim-worker switch1 ${PCI_PREFIX}:01.0 ${PCI_PREFIX}:07.0 1
+./configpair.sh 3 4 ens1f1 1 0 kind-netdevsim-worker switch1 ${PCI_PREFIX}:01.1 ${PCI_PREFIX}:08.0 1
 
 # Server 1 nic 2
 ./configpair.sh 5 6 ens2f0 2 0 kind-netdevsim-worker switch1 ${PCI_PREFIX}:02.0 ${PCI_PREFIX}:09.0

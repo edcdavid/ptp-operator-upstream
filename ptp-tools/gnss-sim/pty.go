@@ -18,9 +18,13 @@ type ptyWriter struct {
 }
 
 func (pw *ptyWriter) Write(p []byte) (int, error) {
-	n, err := pw.master.Write(p)
+	// Use syscall.Write directly to get true O_NONBLOCK semantics.
+	// os.File.Write goes through Go's internal poller which retries
+	// EAGAIN in a tight loop, spinning the CPU and blocking the
+	// goroutine when the PTY buffer is full (no slave reader).
+	n, err := syscall.Write(int(pw.master.Fd()), p)
 	if err != nil {
-		if isTransientPTYError(err) {
+		if err == syscall.EAGAIN || err == syscall.EIO {
 			return len(p), nil
 		}
 		return n, err
