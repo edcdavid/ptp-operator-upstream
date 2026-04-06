@@ -973,13 +973,7 @@ func CreatePtpConfigWPCGrandMaster(policyName string, nodeName string, ifList []
 	if err != nil {
 		logrus.Fatalf("error: %v", err)
 	}
-	if ptphelper.UseGnssSimulation() {
-		logrus.Info("GNSS simulation / netdevsim CI: skipping E810 hardware plugin bundle")
-		plugins = nil
-		ts2phcOpts = " --servo_offset_threshold 5000000 --servo_num_offset_values 10"
-	} else {
-		plugins = result
-	}
+	plugins = result
 	return createConfigWithTs2PhcAndPlugins(policyName,
 		nil,
 		&ptp4lsysOpts,
@@ -1758,11 +1752,6 @@ func createConfigWithTs2PhcAndPlugins(profileName string, ifaceName, ptp4lOpts *
 	thresholds.MaxOffsetThreshold = int64(testParameters.GlobalConfig.MaxOffset)
 	thresholds.MinOffsetThreshold = int64(testParameters.GlobalConfig.MinOffset)
 	ptpSettings := map[string]string{"logReduce": "false"}
-	if ptphelper.UseGnssSimulation() {
-		ptpSettings["MaxInSpecOffset"] = "50000000"
-		ptpSettings["LocalMaxHoldoverOffSet"] = "1500000000"
-		ptpSettings["LocalHoldoverTimeout"] = "14400"
-	}
 	ptpProfile := ptpv1.PtpProfile{Name: &profileName, Interface: ifaceName, Phc2sysOpts: phc2sysOpts, Ptp4lOpts: ptp4lOpts, PtpSchedulingPolicy: &ptpSchedulingPolicy, PtpSchedulingPriority: ptpSchedulingPriority,
 		PtpClockThreshold: &thresholds, Ts2PhcOpts: ts2phcOpts, Plugins: plugins, PtpSettings: ptpSettings}
 	if ptp4lConfig != "" {

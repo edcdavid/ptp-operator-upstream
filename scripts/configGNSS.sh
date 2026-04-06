@@ -21,6 +21,13 @@ set -euo pipefail
 VM_IP=$1
 
 GNSS_SIM_API_PORT="${GNSS_SIM_API_PORT:-9200}"
+
+# Auto-detect the first kernel GNSS char device if not explicitly set.
+if [ -z "${GNSS_KERNEL_DEV:-}" ]; then
+    for g in /dev/gnss*; do
+        [ -c "$g" ] && GNSS_KERNEL_DEV="$g" && break
+    done
+fi
 GNSS_KERNEL_DEV="${GNSS_KERNEL_DEV:-/dev/gnss0}"
 
 echo "=== Setting up GNSS simulator ==="

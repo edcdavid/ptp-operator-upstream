@@ -87,8 +87,13 @@ kubectl get pods -n openshift-ptp -o wide
 # Export GNSS simulation env vars so the test framework can discover them.
 # When a kernel GNSS device is present, ts2phc reads from /dev/gnss0
 # instead of a PTY.
-if [ -c "${GNSS_KERNEL_DEV:-/dev/gnss0}" ]; then
-    export GNSS_SIM_NMEA_DEVICE="${GNSS_SIM_NMEA_DEVICE:-gnss0}"
+# Auto-detect the first kernel GNSS char device.
+GNSS_KERNEL_DEV=""
+for g in /dev/gnss*; do
+    [ -c "$g" ] && GNSS_KERNEL_DEV="$g" && break
+done
+if [ -n "$GNSS_KERNEL_DEV" ]; then
+    export GNSS_SIM_NMEA_DEVICE="${GNSS_SIM_NMEA_DEVICE:-$(basename "$GNSS_KERNEL_DEV")}"
 else
     export GNSS_SIM_NMEA_DEVICE="${GNSS_SIM_NMEA_DEVICE:-ttyGNSS_TS2PHC}"
 fi

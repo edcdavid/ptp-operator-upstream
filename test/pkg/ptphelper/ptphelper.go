@@ -853,7 +853,11 @@ func IsExternalGM() (out bool) {
 	return out
 }
 
-// gnssSimNmeaActive is set when Telco GM uses gnss-sim (or similar) PTY NMEA because hardware GNSS was not found.
+// gnssSimNmeaActive is set when Telco GM uses a kernel virtual GNSS device (netdevsim) or
+// gnss-sim PTY NMEA instead of physical E810 hardware. It enables the "Simulated T-GM" test
+// contexts and skips hardware-only tests (e.g. ubxtool direct GNSS reboot).
+// Note: the e810 plugin is always applied regardless of this flag; the kernel virtual GNSS
+// device responds to UBX protocol commands, so gpsd/ubxtool initialisation succeeds.
 var gnssSimNmeaActive atomic.Bool
 
 // ResetGnssSimNmeaMode clears GNSS source state before a new CreatePtpConfigurations / Telco GM setup.
@@ -883,7 +887,7 @@ func GetListOfWPCEnabledInterfaces(nodeName string) ([]string, string) {
 		if strings.HasSuffix(iFace, "0") {
 			if deviceID, ok := checkGNSSAvailabilityForIfaceHardware(nodeName, iFace); ok {
 				gnssSimNmeaActive.Store(true)
-				logrus.Infof("Telco GM: using kernel GNSS via L2 WPC (interface %s, device %s) — simulation mode", iFace, deviceID)
+				logrus.Infof("Telco GM: using kernel virtual GNSS via L2 WPC (interface %s, device %s) — UBX simulation active", iFace, deviceID)
 				return addAllInterfacesForNic(l2WPC, iFace), deviceID
 			}
 			break
@@ -1231,12 +1235,13 @@ func GNSSSimIsHealthy() bool {
 	return resp.StatusCode == http.StatusOK
 }
 
-// UseGnssSimulation is true after GetListOfWPCEnabledInterfaces selected gnss-sim (or software) PTY NMEA.
+// UseGnssSimulation is true when a kernel virtual GNSS device or gnss-sim PTY is in use
+// (i.e. not a physical E810 with real external GNSS hardware).
 func UseGnssSimulation() bool {
 	return gnssSimNmeaActive.Load()
 }
 
-// IsGnssSimulatedCI is true for conformance paths that target gnss-sim instead of gpsd/hardware GNSS.
+// IsGnssSimulatedCI is true for conformance paths that target a virtual/simulated GNSS source.
 func IsGnssSimulatedCI() bool {
 	return UseGnssSimulation()
 }
