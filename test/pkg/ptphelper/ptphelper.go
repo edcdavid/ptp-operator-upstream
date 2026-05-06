@@ -952,11 +952,40 @@ func IsExternalGM() (out bool) {
 // GetWPCEnabledInterfaces returns the WPC-enabled network interfaces for a
 // given node. Interfaces are grouped by PTP hardware clock and the first
 // group whose PHC has pin support is selected.
+//
+// The lookup is retried several times because sysfs entries inside a
+// freshly-started privileged container may not be visible immediately
+// after Kubernetes reports the pod as Ready.
 func GetWPCEnabledInterfaces(nodeName string) (interfaces []string, err error) {
+	const (
+		maxAttempts = 5
+		retryDelay  = 3 * time.Second
+	)
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		interfaces, err = getWPCEnabledInterfacesOnce(nodeName)
+		if err != nil {
+			return nil, err
+		}
+		if len(interfaces) > 0 {
+			return interfaces, nil
+		}
+		if attempt < maxAttempts {
+			logrus.Infof("GetWPCEnabledInterfaces: no interfaces found on %s (attempt %d/%d), retrying in %s",
+				nodeName, attempt, maxAttempts, retryDelay)
+			time.Sleep(retryDelay)
+		}
+	}
+	logrus.Debugf("GetWPCEnabledInterfaces: no WPC interfaces found on %s after %d attempts", nodeName, maxAttempts)
+	return nil, nil
+}
+
+func getWPCEnabledInterfacesOnce(nodeName string) ([]string, error) {
 	WPCifaces := getWPCEnabledIfaces(nodeName)
 	if len(WPCifaces) == 0 {
+		logrus.Debugf("getWPCEnabledInterfacesOnce: getWPCEnabledIfaces returned 0 interfaces on %s", nodeName)
 		return nil, nil
 	}
+	logrus.Debugf("getWPCEnabledInterfacesOnce: found %d WPC ifaces on %s: %v", len(WPCifaces), nodeName, WPCifaces)
 
 	phcGroups := make(map[int][]string)
 	for _, iFace := range WPCifaces {
@@ -965,14 +994,17 @@ func GetWPCEnabledInterfaces(nodeName string) (interfaces []string, err error) {
 		}
 		idx, err := getPTPHardwareClockIndex(nodeName, iFace)
 		if err != nil {
+			logrus.Debugf("getWPCEnabledInterfacesOnce: getPTPHardwareClockIndex(%s) failed: %v", iFace, err)
 			continue
 		}
 		phcGroups[idx] = append(phcGroups[idx], iFace)
 	}
 
 	if len(phcGroups) == 0 {
+		logrus.Debugf("getWPCEnabledInterfacesOnce: no PHC groups formed on %s", nodeName)
 		return nil, nil
 	}
+	logrus.Debugf("getWPCEnabledInterfacesOnce: PHC groups on %s: %v", nodeName, phcGroups)
 
 	phcIndexes := make([]int, 0, len(phcGroups))
 	for idx := range phcGroups {
@@ -990,11 +1022,19 @@ func GetWPCEnabledInterfaces(nodeName string) (interfaces []string, err error) {
 			logrus.Debugf("PTP pins lookup failed phc=%d err=%v", idx, err)
 			continue
 		}
+		if ifaceWithPins == "" {
+			logrus.Debugf("getWPCEnabledInterfacesOnce: no pins directory for phc=%d on %s", idx, nodeName)
+			continue
+		}
 		for _, iface := range group {
 			if iface == ifaceWithPins {
+				logrus.Debugf("getWPCEnabledInterfacesOnce: selected group %v (phc=%d, pins owner=%s) on %s",
+					group, idx, ifaceWithPins, nodeName)
 				return group, nil
 			}
 		}
+		logrus.Debugf("getWPCEnabledInterfacesOnce: pins owner %s not in group %v for phc=%d on %s",
+			ifaceWithPins, group, idx, nodeName)
 	}
 
 	return nil, nil
@@ -1008,7 +1048,9 @@ func getWPCEnabledIfaces(nodeName string) map[string]string {
 		logrus.Errorf("could not get WPC enabled interfaces, err: %s stderr: %s", err, se.String())
 		return resMap
 	}
-	ifaceArr := strings.Split(so.String(), "\n")
+	raw := so.String()
+	logrus.Debugf("getWPCEnabledIfaces: raw grep output on %s: %q", nodeName, raw)
+	ifaceArr := strings.Split(raw, "\n")
 	replacer := strings.NewReplacer("\r", "", "\n", "")
 	for _, iFace := range ifaceArr {
 		if iFace != "" {
@@ -1057,6 +1099,7 @@ func findIfaceWithPinsForPhc(nodeName string, phcIndex int) (string, error) {
 		return "", fmt.Errorf("PTP pins lookup failed phc=%d stderr=%s err=%v", phcIndex, strings.TrimSpace(se.String()), err)
 	}
 	path := strings.TrimSpace(so.String())
+	logrus.Debugf("findIfaceWithPinsForPhc: phc=%d on %s returned path=%q", phcIndex, nodeName, path)
 	if path == "" {
 		return "", nil
 	}
