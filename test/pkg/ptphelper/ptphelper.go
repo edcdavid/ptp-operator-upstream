@@ -958,7 +958,7 @@ func IsExternalGM() (out bool) {
 // given node. Interfaces are grouped by PTP hardware clock and the first
 // group whose PHC has pin support is selected.
 func GetWPCEnabledInterfaces(nodeName string) (interfaces []string, err error) {
-	WPCifaces := getWPCEnabledIfaces(nodeName)
+	WPCifaces := getWPCEnabledIfacesFromSysfs(nodeName)
 	if len(WPCifaces) == 0 {
 		return nil, nil
 	}
@@ -1153,6 +1153,9 @@ func findIfaceWithPinsForPhc(nodeName string, phcIndex int) (string, error) {
 	if iface == "" {
 		return "", fmt.Errorf("unexpected pins path %q", path)
 	}
+	return iface, nil
+}
+
 func checkGNSSAvailabilityForIfaceHardware(nodeName string, IfaceName string) (string, bool) {
 	cmd := []string{"/bin/sh", "-c", fmt.Sprintf("ls /sys/class/net/%s/device/gnss", IfaceName)}
 	logrus.Infof("cmd = %s ", cmd)
