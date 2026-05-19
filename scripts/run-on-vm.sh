@@ -8,9 +8,6 @@ RUN_PHASE="all"
 REGISTRY_IP=""
 TARBALL=""
 
-# Remove this - Banashri
-TEST_MODES="tgm,tgmoc,tgmbc"
-
 while [[ "${1:-}" == --* ]]; do
     case "$1" in
         --dkms)    export DKMS_MODE=true; shift ;;
