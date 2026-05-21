@@ -582,16 +582,16 @@ var _ = Describe("["+strings.ToLower(DesiredMode.String())+"-serial]", Serial, f
 				}
 				isExternalMaster := ptphelper.IsExternalGM()
 				var grandmasterID *string
-				if fullConfig.L2Config != nil && !isExternalMaster {
-					aLabel := pkg.PtpGrandmasterNodeLabel
-					gmPolicyName := pkg.PtpGrandMasterPolicyName
-					if fullConfig.DiscoveredGrandMasterPtpConfig != nil {
-						gmPolicyName = pkg.PtpWPCGrandMasterPolicyName
-					}
-					aString, err := ptphelper.GetClockIDMaster(gmPolicyName, &aLabel, nil, true)
-					grandmasterID = &aString
-					Expect(err).To(BeNil())
+			if fullConfig.L2Config != nil && !isExternalMaster {
+				aLabel := pkg.PtpGrandmasterNodeLabel
+				gmPolicyName := pkg.PtpGrandMasterPolicyName
+				if fullConfig.PtpModeDiscovered == testconfig.TelcoGMOC || fullConfig.PtpModeDiscovered == testconfig.TelcoGMBC {
+					gmPolicyName = pkg.PtpWPCGrandMasterPolicyName
 				}
+				aString, err := ptphelper.GetClockIDMaster(gmPolicyName, &aLabel, nil, true)
+				grandmasterID = &aString
+				Expect(err).To(BeNil())
+			}
 
 				waitForWPCGMReady(fullConfig)
 
@@ -4155,6 +4155,15 @@ func anyClockClassDifferent(fullConfig testconfig.TestConfig, excludedClass stri
 // The function is a no-op when there is no WPC GM in the topology.
 func waitForWPCGMReady(fullConfig testconfig.TestConfig) {
 	if fullConfig.DiscoveredGrandMasterPtpConfig == nil {
+		return
+	}
+	// Only WPC GM topologies (TelcoGMBC, TelcoGMOC, standalone TGM) converge
+	// dynamically to clock class 6. Regular BC/OC grandmasters use a hardcoded
+	// clock class and must not be blocked on this wait.
+	switch fullConfig.PtpModeDiscovered {
+	case testconfig.TelcoGrandMasterClock, testconfig.TelcoGMOC, testconfig.TelcoGMBC:
+		// fall through to wait
+	default:
 		return
 	}
 	By("Waiting for WPC T-GM to reach clock class 6 (LOCKED)")
