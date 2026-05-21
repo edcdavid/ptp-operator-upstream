@@ -582,16 +582,16 @@ var _ = Describe("["+strings.ToLower(DesiredMode.String())+"-serial]", Serial, f
 				}
 				isExternalMaster := ptphelper.IsExternalGM()
 				var grandmasterID *string
-			if fullConfig.L2Config != nil && !isExternalMaster {
-				aLabel := pkg.PtpGrandmasterNodeLabel
-				gmPolicyName := pkg.PtpGrandMasterPolicyName
-				if fullConfig.PtpModeDiscovered == testconfig.TelcoGMOC || fullConfig.PtpModeDiscovered == testconfig.TelcoGMBC {
-					gmPolicyName = pkg.PtpWPCGrandMasterPolicyName
+				if fullConfig.L2Config != nil && !isExternalMaster {
+					aLabel := pkg.PtpGrandmasterNodeLabel
+					gmPolicyName := pkg.PtpGrandMasterPolicyName
+					if fullConfig.PtpModeDiscovered == testconfig.TelcoGMOC || fullConfig.PtpModeDiscovered == testconfig.TelcoGMBC {
+						gmPolicyName = pkg.PtpWPCGrandMasterPolicyName
+					}
+					aString, err := ptphelper.GetClockIDMaster(gmPolicyName, &aLabel, nil, true)
+					grandmasterID = &aString
+					Expect(err).To(BeNil())
 				}
-				aString, err := ptphelper.GetClockIDMaster(gmPolicyName, &aLabel, nil, true)
-				grandmasterID = &aString
-				Expect(err).To(BeNil())
-			}
 
 				waitForWPCGMReady(fullConfig)
 
