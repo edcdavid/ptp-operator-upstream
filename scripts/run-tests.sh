@@ -211,9 +211,14 @@ init_gnss_sim_env() {
     [ -c "$g" ] && GNSS_KERNEL_DEV="$g" && break
   done
   if [ -n "$GNSS_KERNEL_DEV" ]; then
+    # Kernel GNSS device (e.g. gnss0): pass bare name; gnssSerialPort() in
+    # testconfig.go prepends /dev/ to form /dev/gnss0 inside the pod.
     export GNSS_SIM_NMEA_DEVICE="${GNSS_SIM_NMEA_DEVICE:-$(basename "$GNSS_KERNEL_DEV")}"
   else
-    export GNSS_SIM_NMEA_DEVICE="${GNSS_SIM_NMEA_DEVICE:-ttyGNSS_TS2PHC}"
+    # PTY mode: the host's /var/run/ptp is mounted at /var/run inside the pod.
+    # Pass the full in-pod path so testconfig.go uses it verbatim without
+    # prepending /dev/ (gnssSerialPort() passes through any absolute path).
+    export GNSS_SIM_NMEA_DEVICE="${GNSS_SIM_NMEA_DEVICE:-/var/run/ttyGNSS_TS2PHC}"
   fi
   export GNSS_SIM_IFACE1="${GNSS_SIM_IFACE1:-ens1f0}"
   export GNSS_SIM_IFACE2="${GNSS_SIM_IFACE2:-ens1f1}"

@@ -935,6 +935,17 @@ func CreatePtpConfigGrandMaster(nodeName, ifName string) error {
 		ptr.To(int64(defaultSchedulingPriority)))
 }
 
+// gnssSerialPort returns the full serial port path for ts2phc.nmea_serialport.
+// If deviceID is already an absolute path (e.g. /var/run/ttyGNSS_TS2PHC set
+// by the simulation environment) it is used as-is; otherwise /dev/ is prepended
+// for real hardware device names (e.g. gnss0, ttyGNSS_TS2PHC).
+func gnssSerialPort(deviceID string) string {
+	if strings.HasPrefix(deviceID, "/") {
+		return deviceID
+	}
+	return "/dev/" + deviceID
+}
+
 func CreatePtpConfigWPCGrandMaster(policyName string, nodeName string, ifList []string, deviceID string, label string) error {
 	ptpSchedulingPolicy := SCHED_OTHER
 	configureFifo, err := strconv.ParseBool(os.Getenv("CONFIGURE_FIFO"))
@@ -949,7 +960,7 @@ func CreatePtpConfigWPCGrandMaster(policyName string, nodeName string, ifList []
 		logrus.Errorf("Error setting WPC GM node role label: %s", err)
 	}
 
-	ts2phcConfig := BaseTs2PhcConfig + fmt.Sprintf("\nts2phc.nmea_serialport  /dev/%s\n", deviceID)
+	ts2phcConfig := BaseTs2PhcConfig + fmt.Sprintf("\nts2phc.nmea_serialport  %s\n", gnssSerialPort(deviceID))
 	ts2phcConfig = fmt.Sprintf("%s\n[%s]\nts2phc.extts_polarity rising\nts2phc.extts_correction 0\n", ts2phcConfig, ifList[0])
 	ptp4lConfig := GetPtp4lConfigWithAuth(BasePtp4lConfig) + "boundary_clock_jbod 1\n"
 	ptp4lConfig = AddAuthSettings(AddInterface(ptp4lConfig, ifList[0], 1))

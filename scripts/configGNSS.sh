@@ -8,7 +8,7 @@
 # from the kernel's read FIFO — no PTY needed for the primary NMEA
 # consumer.
 #
-# A second PTY is still created for /dev/ttyGNSS_GNSS0 so a secondary
+# A second PTY is still created for /var/run/ptp/ttyGNSS_GNSS0 so a secondary
 # consumer (e.g. gpsd) can read independently.
 #
 # Falls back to pure PTY mode when no kernel GNSS device is present.
@@ -32,7 +32,8 @@ echo "=== Setting up GNSS simulator ==="
 
 # Kill any previous gnss-sim process
 pkill -f 'gnss-sim.*--api-port' || true
-rm -f /dev/ttyGNSS_TS2PHC /dev/ttyGNSS_GNSS0
+mkdir -p /var/run/ptp
+rm -f /var/run/ptp/ttyGNSS_TS2PHC /var/run/ptp/ttyGNSS_GNSS0
 
 # Build gnss-sim directly from source.
 GNSS_SIM_BIN="/usr/local/bin/gnss-sim"
@@ -47,17 +48,17 @@ if [ -c "$GNSS_KERNEL_DEV" ]; then
     echo "Kernel GNSS device found at $GNSS_KERNEL_DEV — using hybrid mode"
     "$GNSS_SIM_BIN" \
         --gnss-dev "$GNSS_KERNEL_DEV" \
-        --pty-links /dev/ttyGNSS_GNSS0 \
+        --pty-links /var/run/ptp/ttyGNSS_GNSS0 \
         --api-port "${GNSS_SIM_API_PORT}" &
     GNSS_PID=$!
     NMEA_SOURCE="$GNSS_KERNEL_DEV"
 else
     echo "No kernel GNSS device found — using PTY-only mode"
     "$GNSS_SIM_BIN" \
-        --pty-links /dev/ttyGNSS_TS2PHC,/dev/ttyGNSS_GNSS0 \
+        --pty-links /var/run/ptp/ttyGNSS_TS2PHC,/var/run/ptp/ttyGNSS_GNSS0 \
         --api-port "${GNSS_SIM_API_PORT}" &
     GNSS_PID=$!
-    NMEA_SOURCE="/dev/ttyGNSS_TS2PHC"
+    NMEA_SOURCE="/var/run/ptp/ttyGNSS_TS2PHC"
 fi
 echo "gnss-sim PID: $GNSS_PID"
 
@@ -82,25 +83,25 @@ fi
 if [ -c "$GNSS_KERNEL_DEV" ]; then
     echo "Kernel GNSS device $GNSS_KERNEL_DEV present"
 else
-    if [ ! -e /dev/ttyGNSS_TS2PHC ]; then
-        echo "ERROR: PTY symlink /dev/ttyGNSS_TS2PHC not found on host"
+    if [ ! -e /var/run/ptp/ttyGNSS_TS2PHC ]; then
+        echo "ERROR: PTY symlink /var/run/ptp/ttyGNSS_TS2PHC not found on host"
         exit 1
     fi
-    echo "PTY symlink /dev/ttyGNSS_TS2PHC exists"
+    echo "PTY symlink /var/run/ptp/ttyGNSS_TS2PHC exists"
 fi
 
-if [ -e /dev/ttyGNSS_GNSS0 ]; then
-    echo "PTY symlink /dev/ttyGNSS_GNSS0 exists"
+if [ -e /var/run/ptp/ttyGNSS_GNSS0 ]; then
+    echo "PTY symlink /var/run/ptp/ttyGNSS_GNSS0 exists"
 fi
 
 # Verify NMEA output on the secondary PTY
-if [ -e /dev/ttyGNSS_GNSS0 ]; then
-    echo "Verifying NMEA output on /dev/ttyGNSS_GNSS0..."
-    NMEA_LINE=$(timeout 3 head -n 1 /dev/ttyGNSS_GNSS0 2>/dev/null || true)
+if [ -e /var/run/ptp/ttyGNSS_GNSS0 ]; then
+    echo "Verifying NMEA output on /var/run/ptp/ttyGNSS_GNSS0..."
+    NMEA_LINE=$(timeout 3 head -n 1 /var/run/ptp/ttyGNSS_GNSS0 2>/dev/null || true)
     if echo "$NMEA_LINE" | grep -q "GNRMC\|GNGGA\|GPZDA"; then
         echo "GNSS simulator producing valid NMEA: $NMEA_LINE"
     else
-        echo "WARNING: Could not read NMEA from /dev/ttyGNSS_GNSS0 (may need a moment to start)"
+        echo "WARNING: Could not read NMEA from /var/run/ptp/ttyGNSS_GNSS0 (may need a moment to start)"
     fi
 fi
 
@@ -108,4 +109,4 @@ echo "=== GNSS simulator setup complete ==="
 echo "  PID:           $GNSS_PID"
 echo "  API:           http://localhost:${GNSS_SIM_API_PORT}"
 echo "  NMEA source:   $NMEA_SOURCE"
-echo "  GNSS device:   /dev/ttyGNSS_GNSS0"
+echo "  GNSS device:   /var/run/ptp/ttyGNSS_GNSS0"
