@@ -110,6 +110,26 @@ func (s *SimState) SetPosition(pos NMEAPosition) {
 	s.Position = pos
 }
 
+// SetSignalLoss atomically marks the signal as lost: SignalActive=false and
+// GPSFix=NoFix are written under a single lock, so no Snapshot() can observe
+// a contradictory half-updated state.
+func (s *SimState) SetSignalLoss() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.SignalActive = false
+	s.GPSFix = GPSFixNoFix
+}
+
+// SetSignalRestore atomically restores the signal: SignalActive=true,
+// GPSFix=3D, and Satellites=12 are written under a single lock.
+func (s *SimState) SetSignalRestore() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.SignalActive = true
+	s.GPSFix = GPSFix3D
+	s.Satellites = 12
+}
+
 // DefaultState returns a SimState representing a healthy GNSS receiver
 // with a 3D fix, 12 satellites, and a position near Red Hat Tower, Raleigh.
 func DefaultState() *SimState {
@@ -183,19 +203,12 @@ func (sim *Simulator) generate(now time.Time) {
 	// Apply artificial time offset for testing threshold transitions
 	t := now.Add(time.Duration(snap.OffsetNs) * time.Nanosecond)
 
-	active := snap.SignalActive
-	sats := snap.Satellites
-	hdop := snap.HDOP
-	gpsFix := snap.GPSFix
-	if !active {
-		sats = 0
-		hdop = 99.9
-		gpsFix = GPSFixNoFix
-	}
-
+	// GenerateGNRMC and GenerateGNGGA both branch on signalActive internally;
+	// when signalActive is false they produce fixed no-fix output and ignore
+	// the satellite/HDOP/gpsFix parameters entirely, so no local overrides are needed.
 	sentences := []string{
-		GenerateGNRMC(t, snap.Position, active),
-		GenerateGNGGA(t, snap.Position, active, sats, hdop, gpsFix),
+		GenerateGNRMC(t, snap.Position, snap.SignalActive),
+		GenerateGNGGA(t, snap.Position, snap.SignalActive, snap.Satellites, snap.HDOP, snap.GPSFix),
 		GenerateGPZDA(t),
 	}
 

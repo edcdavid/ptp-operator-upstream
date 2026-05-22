@@ -12,9 +12,8 @@ import (
 // Writes that fail with EAGAIN (buffer full) or EIO (no slave reader)
 // are silently dropped so the simulator loop never stalls.
 type ptyWriter struct {
-	master    *os.File
-	linkPath  string
-	slavePath string
+	master   *os.File
+	linkPath string
 }
 
 func (pw *ptyWriter) Write(p []byte) (int, error) {
@@ -35,13 +34,6 @@ func (pw *ptyWriter) Write(p []byte) (int, error) {
 func (pw *ptyWriter) Close() error {
 	os.Remove(pw.linkPath)
 	return pw.master.Close()
-}
-
-func isTransientPTYError(err error) bool {
-	if pe, ok := err.(*os.PathError); ok {
-		err = pe.Err
-	}
-	return err == syscall.EAGAIN || err == syscall.EIO
 }
 
 // openPTYLink creates a PTY pair, symlinks the slave to linkPath, and
@@ -77,5 +69,5 @@ func openPTYLink(linkPath string) (*ptyWriter, error) {
 	}
 
 	log.Printf("created PTY: %s -> %s", linkPath, slavePath)
-	return &ptyWriter{master: master, linkPath: linkPath, slavePath: slavePath}, nil
+	return &ptyWriter{master: master, linkPath: linkPath}, nil
 }

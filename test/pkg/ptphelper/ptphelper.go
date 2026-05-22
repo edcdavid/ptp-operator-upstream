@@ -1430,33 +1430,6 @@ func GNSSSimGetDPLLState() (*GNSSSimDPLLState, error) {
 	return &state, nil
 }
 
-// GNSSSimStatus represents the simulator state returned by gnss-sim.
-type GNSSSimStatus struct {
-	SignalActive bool    `json:"signalActive"`
-	GPSFix       int     `json:"gpsFix"`
-	Satellites   int     `json:"satellites"`
-	HDOP         float64 `json:"hdop"`
-	OffsetNs     int64   `json:"offsetNs"`
-}
-
-// GNSSSimGetStatus retrieves the current simulator state from the gnss-sim API.
-func GNSSSimGetStatus() (*GNSSSimStatus, error) {
-	resp, err := http.Get(GNSSSimAPIBase() + "/api/status")
-	if err != nil {
-		return nil, fmt.Errorf("gnss-sim status request failed: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("gnss-sim status returned %d: %s", resp.StatusCode, string(body))
-	}
-	var status GNSSSimStatus
-	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
-		return nil, fmt.Errorf("gnss-sim status decode failed: %v", err)
-	}
-	return &status, nil
-}
-
 // GNSSSimIsHealthy returns true if the gnss-sim /health endpoint responds with 200 OK.
 func GNSSSimIsHealthy() bool {
 	resp, err := http.Get(GNSSSimAPIBase() + "/health")
@@ -1475,11 +1448,6 @@ func UseGnssSimulation() bool {
 
 // IsGnssSimulatedCI is true for conformance paths that target a virtual/simulated GNSS source.
 func IsGnssSimulatedCI() bool {
-	return UseGnssSimulation()
-}
-
-// IsIntegratedGnssSim is an alias for UseGnssSimulation (historical name).
-func IsIntegratedGnssSim() bool {
 	return UseGnssSimulation()
 }
 

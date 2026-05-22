@@ -32,12 +32,6 @@ func NewAPIServer(state *SimState, dpll *DPLLSimulator) *APIServer {
 	return s
 }
 
-// ListenAndServe starts the HTTP server on the given address (e.g. ":9200").
-func (s *APIServer) ListenAndServe(addr string) error {
-	log.Printf("API server listening on %s", addr)
-	return http.ListenAndServe(addr, s.mux)
-}
-
 // GET /health — simple health check for readiness probes.
 func (s *APIServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
@@ -90,8 +84,7 @@ func (s *APIServer) handleSignalLoss(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	s.state.SetSignal(false)
-	s.state.SetGPSFix(GPSFixNoFix)
+	s.state.SetSignalLoss()
 	log.Println("API: signal loss triggered")
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "signal_lost"})
@@ -109,9 +102,7 @@ func (s *APIServer) handleSignalRestore(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	s.state.SetSignal(true)
-	s.state.SetGPSFix(GPSFix3D)
-	s.state.SetSatellites(12)
+	s.state.SetSignalRestore()
 	log.Println("API: signal restored")
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "signal_restored"})
