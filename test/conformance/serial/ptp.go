@@ -2294,16 +2294,17 @@ var _ = Describe("["+strings.ToLower(DesiredMode.String())+"-serial]", Serial, f
 				logrus.Info("Successfully verified T-BC clock class recovery after upstream link outage")
 			})
 
-			// OsClockSyncState goes FREERUN when BC upstream is lost (reverse phc2sys)
-			// and recovers to LOCKED when the link is restored.
+			// OsClockSyncState goes FREERUN when BC upstream is lost and phc2sys
+			// stops selecting CLOCK_REALTIME as a sink; recovers to LOCKED when
+			// the link is restored. This is not reverse sync (-r -r).
 			//
-			// Reproduces Case 04504543 / reverse-sync regression after OCPBUGS-88369:
-			// with phc2sysOpts -a -r, losing the BC slave causes phc2sys to reverse
-			// (PHC ← CLOCK_REALTIME) and stop emitting CLOCK_REALTIME phc offset.
-			// cloud-event-proxy must publish os-clock-sync-state FREERUN.
+			// Reproduces Case 04504543 / OS-clock discipline regression after OCPBUGS-88369:
+			// with phc2sysOpts -a -r, losing the BC slave causes phc2sys to stop
+			// emitting CLOCK_REALTIME phc offset. cloud-event-proxy must publish
+			// os-clock-sync-state FREERUN from the selection window.
 			//
 			// Run with: PTP_TEST_MODE=BC|DualNICBC|TBC (or Discovery of those) ENABLE_PTP_EVENT=true SKIP_INTERFACES=<mgmt,...>
-			// Requires a cloud-event-proxy build that includes reverse-sync FREERUN detection.
+			// Requires a cloud-event-proxy build that includes OS-clock discipline FREERUN detection.
 			// Skips on Kind/netdevsim when phc2sysOpts lacks -a -r or CLOCK_REALTIME metric is absent.
 			It("OsClockSyncState goes FREERUN on BC upstream loss and recovers to LOCKED", func() {
 				if fullConfig.PtpModeDiscovered != testconfig.BoundaryClock &&
@@ -2312,7 +2313,7 @@ var _ = Describe("["+strings.ToLower(DesiredMode.String())+"-serial]", Serial, f
 					Skip("test only valid for BC, DualNICBC, and T-BC (not DualNICBCHA HA)")
 				}
 				if !bcProfileHasNetworkDisciplinedOsClock((*ptpv1.PtpConfig)(fullConfig.DiscoveredClockUnderTestPtpConfig)) {
-					Skip("requires phc2sysOpts with -a -r for CLOCK_REALTIME reverse-sync; " +
+					Skip("requires phc2sysOpts with -a -r for network-disciplined CLOCK_REALTIME; " +
 						"skipped on Kind/netdevsim where DisableAllSlaveRTUpdate strips RT sync " +
 						"(shared host CLOCK_REALTIME)")
 				}
@@ -2363,7 +2364,7 @@ var _ = Describe("["+strings.ToLower(DesiredMode.String())+"-serial]", Serial, f
 					waitForOsClockSyncState(evCtx.ch, ptpEvent.LOCKED, pkg.TimeoutIn3Minutes)
 				}
 
-				By("Taking all BC slave interfaces down to force phc2sys reverse-sync")
+				By("Taking all BC slave interfaces down to stop OS-clock discipline")
 				outageStart := time.Now()
 				err := portEngine.TurnAllPortsDown(skipInterfaces)
 				Expect(err).To(BeNil())
@@ -2371,15 +2372,15 @@ var _ = Describe("["+strings.ToLower(DesiredMode.String())+"-serial]", Serial, f
 					_ = portEngine.TurnAllPortsUp()
 				})
 
-				By("Correlating phc2sys reverse-sync log signals (best-effort)")
-				correlatePhc2sysReverseSync(fullConfig.DiscoveredClockUnderTestPod, outageStart)
+				By("Correlating phc2sys selection log signals (best-effort)")
+				correlatePhc2sysOsClockSelection(fullConfig.DiscoveredClockUnderTestPod, outageStart)
 
 				By("Checking CLOCK_REALTIME metric is FREERUN after upstream loss")
 				Eventually(func() error {
 					return metrics.CheckClockRealTimeState(metrics.MetricClockStateFreeRun, &nodeName)
 				}, pkg.TimeoutIn5Minutes, pkg.Timeout10Seconds).Should(Succeed(),
-					"CLOCK_REALTIME must go FREERUN when BC upstream is lost (reverse phc2sys); "+
-						"stuck LOCKED indicates missing reverse-sync detection in cloud-event-proxy")
+					"CLOCK_REALTIME must go FREERUN when BC upstream is lost and samples stop; "+
+						"stuck LOCKED indicates missing OS-clock discipline detection in cloud-event-proxy")
 
 				if evCtx.available {
 					By("Checking OsClockSyncStateChange event is FREERUN")
@@ -2401,7 +2402,7 @@ var _ = Describe("["+strings.ToLower(DesiredMode.String())+"-serial]", Serial, f
 					waitForOsClockSyncState(evCtx.ch, ptpEvent.LOCKED, pkg.TimeoutIn5Minutes)
 				}
 
-				logrus.Info("Successfully verified OsClockSyncState FREERUN/LOCKED around BC reverse-sync outage")
+				logrus.Info("Successfully verified OsClockSyncState FREERUN/LOCKED around BC OS-clock outage")
 			})
 
 			It("Should restart ptp4l with no socket errors after SIGTERM", func() {
@@ -4368,7 +4369,7 @@ func clockRealTimeMetricAvailable(nodeName string, timeout time.Duration) bool {
 }
 
 // osClockEventContext holds an OsClockSyncStateChange subscription for BC
-// reverse-sync outage tests.
+// OS-clock discipline outage tests.
 type osClockEventContext struct {
 	ch        <-chan exports.StoredEvent
 	available bool
@@ -4446,29 +4447,29 @@ func waitForOsClockSyncState(ch <-chan exports.StoredEvent, expected ptpEvent.Sy
 	}
 }
 
-// correlatePhc2sysReverseSync best-effort checks daemon logs for reverse-sync
-// signals after an outage. Hard assertions remain on CLOCK_REALTIME metrics/events.
-func correlatePhc2sysReverseSync(pod *v1core.Pod, since time.Time) {
+// correlatePhc2sysOsClockSelection best-effort checks daemon logs for selection
+// signals after an outage (reconfigure / selecting NIC / already selected).
+// Missing sys offset is expected under -a -r (not reverse sync). Hard assertions
+// remain on CLOCK_REALTIME metrics/events.
+func correlatePhc2sysOsClockSelection(pod *v1core.Pod, since time.Time) {
 	if pod == nil {
 		return
 	}
-	// Match linuxptp 4.4 phc2sys reverse-sync signals: reconfigure, selecting
-	// <iface> for synchronization, dual-port "already selected", or sys offset.
-	const reverseSyncPattern = `phc2sys(?m).*?(?:reconfiguring after port state change|sys offset|selecting \S+ for synchronization|already selected)`
+	const selectionPattern = `phc2sys(?m).*?(?:reconfiguring after port state change|selecting \S+ for synchronization|already selected)`
 	matches, err := pods.GetPodLogsRegexSince(
 		pod.Namespace,
 		pod.Name,
 		pkg.PtpContainerName,
-		reverseSyncPattern,
+		selectionPattern,
 		false,
 		pkg.TimeoutIn1Minute,
 		since,
 	)
 	if err != nil || len(matches) == 0 {
-		logrus.Warnf("phc2sys reverse-sync log correlate: no reconfiguring/selection/sys offset lines yet (logReduce may hide them): err=%v", err)
+		logrus.Warnf("phc2sys OS-clock selection correlate: no reconfiguring/selection lines yet (logReduce may hide them): err=%v", err)
 		return
 	}
-	logrus.Infof("phc2sys reverse-sync correlate: saw %d matching log line(s), last=%q",
+	logrus.Infof("phc2sys OS-clock selection correlate: saw %d matching log line(s), last=%q",
 		len(matches), matches[len(matches)-1][0])
 }
 
