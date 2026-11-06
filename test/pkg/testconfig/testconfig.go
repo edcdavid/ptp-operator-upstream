@@ -742,10 +742,15 @@ func createPtpConfigurations(ctx context.Context) error {
 	}
 
 	if GlobalConfig.PtpModeDesired != Discovery {
-		// for external grand master, clean previous configuration so that it is not detected as a external grandmaster
-		err := clean.All()
-		if err != nil {
-			logrus.Errorf("Error deleting labels and configuration, err=%s", err)
+		// Keep an explicitly preserved configuration (KEEP_PTPCONFIG=true) so
+		// focused runs and the serial/parallel split do not lose node labels
+		// and PtpConfigs between suites.
+		if !strings.EqualFold(os.Getenv("KEEP_PTPCONFIG"), "true") {
+			// for external grand master, clean previous configuration so that it is not detected as a external grandmaster
+			err := clean.All()
+			if err != nil {
+				logrus.Errorf("Error deleting labels and configuration, err=%s", err)
+			}
 		}
 		ptphelper.RestartPTPDaemon()
 		ptphelper.WaitForPtpDaemonToExist()
