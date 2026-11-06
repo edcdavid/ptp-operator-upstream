@@ -751,6 +751,10 @@ func createPtpConfigurations(ctx context.Context) error {
 			if err != nil {
 				logrus.Errorf("Error deleting labels and configuration, err=%s", err)
 			}
+		} else {
+			// Preserve node role labels (the selected clock-under-test) but
+			// drop stale PtpConfigs so creation does not fail with AlreadyExists.
+			clean.Configs()
 		}
 		ptphelper.RestartPTPDaemon()
 		ptphelper.WaitForPtpDaemonToExist()
