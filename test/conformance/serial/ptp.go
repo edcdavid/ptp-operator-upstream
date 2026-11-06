@@ -5335,7 +5335,7 @@ func checkPTPNMEAStatus(fullConfig testconfig.TestConfig, expectedState string) 
 
 func disableGNSSViaSignalRequirements(fullConfig testconfig.TestConfig) {
 	_, _, err := pods.ExecCommand(client.Client, true, fullConfig.DiscoveredClockUnderTestPod,
-		pkg.PtpContainerName, []string{"ubxtool", "-P", "29.25", "-w", "1", "-v", "3", "-z", "CFG-NAVSPG-INFIL_NCNOTHRS,50,1"})
+		pkg.PtpContainerName, []string{"ubxtool", "-P", "29.20", "-w", "1", "-v", "3", "-z", "CFG-NAVSPG-INFIL_NCNOTHRS,50,1"})
 	if err != nil {
 		fmt.Fprintf(GinkgoWriter, "Error disabling GNSS: %v\n", err)
 	} else {
@@ -5345,7 +5345,7 @@ func disableGNSSViaSignalRequirements(fullConfig testconfig.TestConfig) {
 
 func enableGNSSViaSignalRequirements(fullConfig testconfig.TestConfig) {
 	_, _, err := pods.ExecCommand(client.Client, true, fullConfig.DiscoveredClockUnderTestPod,
-		pkg.PtpContainerName, []string{"ubxtool", "-P", "29.25", "-w", "1", "-v", "3", "-z", "CFG-NAVSPG-INFIL_NCNOTHRS,0,1"})
+		pkg.PtpContainerName, []string{"ubxtool", "-P", "29.20", "-w", "1", "-v", "3", "-z", "CFG-NAVSPG-INFIL_NCNOTHRS,0,1"})
 	if err != nil {
 		fmt.Fprintf(GinkgoWriter, "Error enabling GNSS: %v\n", err)
 	} else {
