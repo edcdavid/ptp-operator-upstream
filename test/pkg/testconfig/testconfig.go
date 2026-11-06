@@ -2255,6 +2255,20 @@ func PtpConfigTelcoGM(isExtGM bool) error {
 		gm0 := (*data.testClockRolesAlgoMapping[BestSolution])[Grandmaster]
 		gm1 := (*data.testClockRolesAlgoMapping[BestSolution])[GrandmasterSibling]
 
+		// The solver can find multiple valid WPC/GNSS nodes (e.g. lab GM and
+		// BC). Allow the caller to pin the physical T-GM node so the test
+		// exercises the intended clock and not another WPC-capable node.
+		if preferredNode := os.Getenv("PTP_GM_NODE"); preferredNode != "" {
+			ptpIfList := GlobalConfig.L2Config.GetPtpIfList()
+			for _, candidate := range *data.solutions[BestSolution] {
+				if ptpIfList[candidate[gm0]].NodeName == preferredNode {
+					solution = candidate
+					logrus.Infof("PtpConfigTelcoGM: using GM solution on %s", preferredNode)
+					break
+				}
+			}
+		}
+
 		gmIf0 := GlobalConfig.L2Config.GetPtpIfList()[solution[gm0]]
 		gmIf1 := GlobalConfig.L2Config.GetPtpIfList()[solution[gm1]]
 
