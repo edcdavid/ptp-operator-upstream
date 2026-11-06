@@ -4900,6 +4900,11 @@ func checkProcessStatus(fullConfig testconfig.TestConfig, state string) {
 		if !ptphelper.IsGnssSimConfigured() {
 			required = append([]string{"phc2sys"}, required...)
 		}
+		for _, process := range required {
+			if st, found := getProcessStatusByProcess(buf.String(), process); found && !isProcessDelayed(fullConfig, process) {
+				failOnBadValue(st, state, "0", "process "+process+" status")
+			}
+		}
 		var failing []string
 		for _, process := range required {
 			if !status[process] {
@@ -4910,43 +4915,45 @@ func checkProcessStatus(fullConfig testconfig.TestConfig, state string) {
 	}, timeout, 5*time.Second).Should(BeEmpty(), "Processes missing or not reporting status %s", state)
 }
 
+func getPtp4lClockClass(fullConfig testconfig.TestConfig) (string, bool) {
+	buf, _, err := pods.ExecCommand(client.Client, true, fullConfig.DiscoveredClockUnderTestPod, pkg.PtpContainerName, []string{"curl", pkg.MetricsEndPoint})
+	if err != nil {
+		refreshPodOnNotFound(fullConfig.DiscoveredClockUnderTestPod, err)
+		return "", false
+	}
+	scanner := bufio.NewScanner(strings.NewReader(buf.String()))
+	for scanner.Scan() {
+		if matches := clockClassRe.FindStringSubmatch(scanner.Text()); matches != nil {
+			if strings.TrimSpace(matches[2]) == "ptp4l" {
+				return strings.TrimSpace(matches[3]), true
+			}
+		}
+	}
+	return "", false
+}
+
+// failOnBadValue fails immediately when a wait observes a terminal bad value
+// instead of retrying until the full timeout.
+func failOnBadValue(actual, expected, bad, description string) {
+	if actual != "" && actual == bad && expected != bad {
+		Fail(fmt.Sprintf("%s is %s while waiting for %s", description, actual, expected))
+	}
+}
+
 func checkClockClassState(fullConfig testconfig.TestConfig, expectedState string, timeout time.Duration) {
 	By(fmt.Sprintf("Waiting for clock class to become %s", expectedState))
 	logging.WriteStep(fmt.Sprintf("Waiting for clock class to become %s", expectedState))
 	Eventually(func() bool {
-		// Get the latest metrics output
-		buf, _, err := pods.ExecCommand(client.Client, true, fullConfig.DiscoveredClockUnderTestPod, pkg.PtpContainerName, []string{"curl", pkg.MetricsEndPoint})
-		if err != nil {
-			fmt.Fprintf(GinkgoWriter, "Error executing curl: %v\n", err)
-			refreshPodOnNotFound(fullConfig.DiscoveredClockUnderTestPod, err)
+		class, found := getPtp4lClockClass(fullConfig)
+		if !found {
 			return false
 		}
-
-		// Scan line by line
-		scanner := bufio.NewScanner(strings.NewReader(buf.String()))
-		for scanner.Scan() {
-			line := scanner.Text()
-
-			// Check if the line matches the clock class pattern
-			matches := clockClassRe.FindStringSubmatch(line)
-			if len(matches) >= 4 {
-				fmt.Fprintf(GinkgoWriter, "Matched line: %v\n", matches)
-				process := matches[2]
-				class := matches[3]
-				if strings.TrimSpace(process) == "ptp4l" && strings.TrimSpace(class) == expectedState {
-					fmt.Fprintf(GinkgoWriter, "Found clock class %s for process %s\n", class, process)
-					return true
-				} else {
-					fmt.Fprintf(GinkgoWriter, "Match found but process=%s class=%s, not matching yet...\n", process, class)
-				}
-			}
+		if class == expectedState {
+			fmt.Fprintf(GinkgoWriter, "Found clock class %s for process ptp4l\n", class)
+			return true
 		}
-
-		// If error during scan
-		if err := scanner.Err(); err != nil {
-			fmt.Fprintf(GinkgoWriter, "Error scanning metrics: %v\n", err)
-		}
-
+		failOnBadValue(class, expectedState, "248", "ptp4l clock class")
+		fmt.Fprintf(GinkgoWriter, "Clock class is %s, not %s yet...\n", class, expectedState)
 		return false
 	}, timeout, pkg.Timeout1Seconds).Should(BeTrue(),
 		fmt.Sprintf("Expected ptp4l clock class to eventually be %s for GM", expectedState))
@@ -4972,6 +4979,7 @@ func checkDPLLFrequencyState(fullConfig testconfig.TestConfig, state string) {
 		if !found {
 			return "", fmt.Errorf("%s metric for process dpll not found", metrics.OpenshiftPtpFrequencyStatus)
 		}
+		failOnBadValue(value, state, "0", "dpll frequency status")
 		return value, nil
 	}, pkg.TimeoutIn5Minutes, pkg.TimeoutInterval2Seconds).Should(Equal(state),
 		fmt.Sprintf("Expected dpll frequency status to be %s for GM", state))
@@ -4994,6 +5002,7 @@ func checkDPLLPhaseState(fullConfig testconfig.TestConfig, state string) {
 		if !found {
 			return "", fmt.Errorf("%s metric for process dpll not found", metrics.OpenshiftPtpPhaseStatus)
 		}
+		failOnBadValue(value, state, "0", "dpll phase status")
 		return value, nil
 	}, pkg.TimeoutIn5Minutes, pkg.TimeoutInterval2Seconds).Should(Equal(state),
 		fmt.Sprintf("Expected dpll phase status to be %s for GM", state))
@@ -5020,6 +5029,7 @@ func checkClockState(fullConfig testconfig.TestConfig, state string) {
 		if !found {
 			return "", fmt.Errorf("%s metric for process GM not found", metrics.OpenshiftPtpClockState)
 		}
+		failOnBadValue(value, state, "0", "GM clock state")
 		return value, nil
 	}, pkg.TimeoutIn5Minutes, pkg.TimeoutInterval2Seconds).Should(Equal(state),
 		fmt.Sprintf("Expected GM clock state to be %s for GM", state))
@@ -5046,6 +5056,7 @@ func checkClockStateForProcess(fullConfig testconfig.TestConfig, process string,
 		if !found {
 			return "", fmt.Errorf("%s metric for process %s not found", metrics.OpenshiftPtpClockState, process)
 		}
+		failOnBadValue(value, state, "0", process+" clock state")
 		return value, nil
 	}, pkg.TimeoutIn5Minutes, pkg.TimeoutInterval2Seconds).Should(Equal(state),
 		fmt.Sprintf("Expected %s clock state to be %s for GM", process, state))
@@ -5221,6 +5232,7 @@ func checkStatusByProcess(fullConfig testconfig.TestConfig, process string, stat
 		if !found {
 			return ""
 		}
+		failOnBadValue(retState, state, "0", "process "+process+" status")
 		return retState
 	}, timeout, pkg.Timeout10Seconds).Should(Equal(state),
 		fmt.Sprintf("Expected %s process status to be %s", process, state))
@@ -5331,6 +5343,7 @@ func checkPTPNMEAStatus(fullConfig testconfig.TestConfig, expectedState string) 
 			}
 		}
 
+		failOnBadValue(foundState, expectedState, "0", "ts2phc NMEA state")
 		return foundState == expectedState
 	}, pkg.TimeoutIn3Minutes, 5*time.Second).Should(BeTrue(), fmt.Sprintf("Expected ts2phc NMEA state to be %s for GM", expectedState))
 }
@@ -5383,12 +5396,15 @@ func waitForClockClass(fullConfig testconfig.TestConfig, expectedState string) {
 	start := time.Now()
 
 	for {
-		if checkClockClassStateReturnBool(fullConfig, expectedState) {
+		class, found := getPtp4lClockClass(fullConfig)
+		if found && class == expectedState {
 			fmt.Fprintf(GinkgoWriter, "✅ Clock class reached %s\n", expectedState)
 			break
-		} else {
-			fmt.Fprintf(GinkgoWriter, "Clock class not yet %s, retrying...\n", expectedState)
 		}
+		if found {
+			failOnBadValue(class, expectedState, "248", "ptp4l clock class")
+		}
+		fmt.Fprintf(GinkgoWriter, "Clock class not yet %s, retrying...\n", expectedState)
 
 		time.Sleep(pkg.TimeoutInterval2Seconds)
 
@@ -5400,23 +5416,8 @@ func waitForClockClass(fullConfig testconfig.TestConfig, expectedState string) {
 }
 
 func checkClockClassStateReturnBool(fullConfig testconfig.TestConfig, expectedState string) bool {
-	buf, _, err := pods.ExecCommand(client.Client, true, fullConfig.DiscoveredClockUnderTestPod, pkg.PtpContainerName, []string{"curl", pkg.MetricsEndPoint})
-	if err != nil {
-		refreshPodOnNotFound(fullConfig.DiscoveredClockUnderTestPod, err)
-		return false
-	}
-	scanner := bufio.NewScanner(strings.NewReader(buf.String()))
-	for scanner.Scan() {
-		line := scanner.Text()
-		if matches := clockClassRe.FindStringSubmatch(line); matches != nil {
-			process := matches[2]
-			class := matches[3]
-			if strings.TrimSpace(process) == "ptp4l" && strings.TrimSpace(class) == expectedState {
-				return true
-			}
-		}
-	}
-	return false
+	class, found := getPtp4lClockClass(fullConfig)
+	return found && class == expectedState
 }
 
 // anyClockClassDifferent returns true when at least one ptp4l instance on the
@@ -5752,9 +5753,12 @@ func waitForClockClassViaEvent(subs event.Subscriptions, iface string, cc int, t
 		case ev := <-subs.CLOCKCLASS:
 			if res, ok := processEvent(ptpEvent.PtpClockClassChange, ev); ok {
 				if raw, ok2 := event.ValueByInterfaceAndDataType(res.Values, iface, "metric"); ok2 {
-					if v, ok3 := raw.(float64); ok3 && int(v) == cc {
-						fmt.Fprintf(GinkgoWriter, "ClockClass %d on %s observed via cloud events\n", cc, iface)
-						return
+					if v, ok3 := raw.(float64); ok3 {
+						if int(v) == cc {
+							fmt.Fprintf(GinkgoWriter, "ClockClass %d on %s observed via cloud events\n", cc, iface)
+							return
+						}
+						failOnBadValue(strconv.Itoa(int(v)), strconv.Itoa(cc), "248", "clockClass via cloud events")
 					}
 				}
 			}

@@ -1356,7 +1356,7 @@ func CreatePtpConfigWPCGrandMaster(policyName string, nodeName string, ifList []
 	ptp4lConfig = AddAuthSettings(AddInterface(ptp4lConfig, ifList[0], 1))
 	ptp4lConfig = AddAuthSettings(AddInterface(ptp4lConfig, ifList[1], 1))
 	ptp4lsysOpts := ptp4lEthernet
-	ts2phcOpts := " "
+	ts2phcOpts := "--ts2phc.holdover 600"
 	ph2sysOpts := fmt.Sprintf("-r -u 0 -m -N 8 -R 16 -s %s -n 24", ifList[0])
 
 	// Hardware T-GM: restore E810 holdover thresholds from main. Simulation leaves
