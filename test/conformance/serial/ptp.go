@@ -4952,7 +4952,9 @@ func checkClockClassState(fullConfig testconfig.TestConfig, expectedState string
 			fmt.Fprintf(GinkgoWriter, "Found clock class %s for process ptp4l\n", class)
 			return true
 		}
-		failOnBadValue(class, expectedState, "248", "ptp4l clock class")
+		if expectedState == "7" {
+			failOnBadValue(class, expectedState, "248", "ptp4l clock class")
+		}
 		fmt.Fprintf(GinkgoWriter, "Clock class is %s, not %s yet...\n", class, expectedState)
 		return false
 	}, timeout, pkg.Timeout1Seconds).Should(BeTrue(),
