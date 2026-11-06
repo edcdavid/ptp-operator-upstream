@@ -741,6 +741,14 @@ func createPtpConfigurations(ctx context.Context) error {
 		return err
 	}
 
+	if GlobalConfig.PtpModeDesired != Discovery && strings.EqualFold(os.Getenv("KEEP_PTPCONFIG"), "true") {
+		existing := GetFullDiscoveredConfig(pkg.PtpLinuxDaemonNamespace, false)
+		if existing.Status == DiscoverySuccessStatus && existing.PtpModeDesired == GlobalConfig.PtpModeDesired {
+			logrus.Infof("KEEP_PTPCONFIG=true: using existing %s configuration", GlobalConfig.PtpModeDesired)
+			return nil
+		}
+	}
+
 	if GlobalConfig.PtpModeDesired != Discovery {
 		// Keep an explicitly preserved configuration (KEEP_PTPCONFIG=true) so
 		// focused runs and the serial/parallel split do not lose node labels
