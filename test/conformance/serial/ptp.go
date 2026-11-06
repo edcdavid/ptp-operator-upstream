@@ -3150,6 +3150,9 @@ var _ = Describe("["+strings.ToLower(DesiredMode.String())+"-serial]", Serial, f
 				}
 				fullConfig = testconfig.GetFullDiscoveredConfig(pkg.PtpLinuxDaemonNamespace, true)
 				requireDiscoveryAfterRefresh(&fullConfig, testconfig.TelcoGrandMasterClock)
+				// A previous test or aborted run may have left the GNSS disabled
+				// (CFG-NAVSPG-INFIL_NCNOTHRS=50). Restore it before checking stability.
+				enableGNSSViaSignalRequirements(fullConfig)
 			})
 			/*
 				Step | Action
@@ -3173,7 +3176,6 @@ var _ = Describe("["+strings.ToLower(DesiredMode.String())+"-serial]", Serial, f
 
 					// Disable GNSS
 					disableGNSSViaSignalRequirements(fullConfig)
-					defer enableGNSSViaSignalRequirements(fullConfig) // Clean up incase test fails
 
 					// Meanwhile, wait for ClockClass 7 (GNSS loss - Holdover In Spec)
 					waitForClockClass(fullConfig, strconv.Itoa(int(fbprotocol.ClockClass7)))
@@ -5334,6 +5336,10 @@ func checkPTPNMEAStatus(fullConfig testconfig.TestConfig, expectedState string) 
 }
 
 func disableGNSSViaSignalRequirements(fullConfig testconfig.TestConfig) {
+	// Always restore GNSS after this test, even if it fails or times out.
+	DeferCleanup(func() {
+		enableGNSSViaSignalRequirements(fullConfig)
+	})
 	_, _, err := pods.ExecCommand(client.Client, true, fullConfig.DiscoveredClockUnderTestPod,
 		pkg.PtpContainerName, []string{"ubxtool", "-P", "29.20", "-w", "1", "-v", "3", "-z", "CFG-NAVSPG-INFIL_NCNOTHRS,50,1"})
 	if err != nil {
