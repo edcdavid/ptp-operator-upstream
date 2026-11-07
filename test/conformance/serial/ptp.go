@@ -3392,8 +3392,8 @@ var _ = Describe("["+strings.ToLower(DesiredMode.String())+"-serial]", Serial, f
 				fmt.Fprintf(GinkgoWriter, "Event recieved  %v, ", events)
 
 				// Verify conditions have returned to LOCKED
-				By("Verifying GNSS state Locked")
-				verifyEvent(events[ptpEvent.GnssStateChange], ptpEvent.LOCKED)
+				By("Verifying GNSS state Synchronized")
+				verifyEvent(events[ptpEvent.GnssStateChange], ptpEvent.SYNCHRONIZED)
 				By("Verifying ClockClass value to 6")
 				verifyMetric(events[ptpEvent.PtpClockClassChange], float64(fbprotocol.ClockClass6))
 				By("Verifying PTP state Locked")
@@ -3741,8 +3741,8 @@ var _ = Describe("["+strings.ToLower(DesiredMode.String())+"-serial]", Serial, f
 				events = getGMEvents(subs.GNSS, subs.CLOCKCLASS, subs.LOCKSTATE, 30*time.Second)
 				fmt.Fprintf(GinkgoWriter, "Sim T-GM recovery events: %v\n", events)
 
-				By("Verifying GNSS state Locked")
-				verifyEvent(events[ptpEvent.GnssStateChange], ptpEvent.LOCKED)
+				By("Verifying GNSS state Synchronized")
+				verifyEvent(events[ptpEvent.GnssStateChange], ptpEvent.SYNCHRONIZED)
 				By("Verifying ClockClass returns to 6")
 				verifyMetric(events[ptpEvent.PtpClockClassChange], float64(fbprotocol.ClockClass6))
 				By("Verifying PTP state Locked")
